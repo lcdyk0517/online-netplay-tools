@@ -39,27 +39,43 @@ void App::refresh_zt_async() {
     const std::string own = zt_own;
     async.start([this, d, host, own] {
         std::string target = d->target;
+        bool is_host = host;
+        std::string host_net = own;
         /* Adopt a network hosted on this device if the config forgot it. */
-        if (!host && zt_installed() && zt_daemon_up()) {
+        if (!is_host && zt_installed() && zt_daemon_up()) {
             std::vector<std::string> nets = zt_controller_networks();
             if (!nets.empty()) {
                 d->adopt = nets[0];
                 target = d->adopt;
+                is_host = true;
+                host_net = d->adopt;
             }
+        }
+        if (async.cancelled()) return;
+        /* A host stays joined to its own network; only do this when the
+         * daemon is already running so opening the tool never starts it. */
+        if (is_host && zt_valid_id(host_net) && zt_daemon_up()) {
+            zt_cli("join", host_net);
+            usleep(300000);
         }
         if (async.cancelled()) return;
         d->st = zt_status(target);
         if (async.cancelled()) return;
-        std::string members_net = !d->adopt.empty() ? d->adopt : (host ? own : "");
-        if (zt_valid_id(members_net))
-            d->members = zt_fetch_members(members_net);
+        if (zt_valid_id(host_net))
+            d->members = zt_fetch_members(host_net);
     }, [this, d] {
+        bool changed = false;
         if (!d->adopt.empty() && !zt_host) {
             zt_own = d->adopt;
             zt_host = true;
-            if (zt_net.empty()) zt_net = zt_own;
-            save_cfg();
+            changed = true;
         }
+        if (zt_host && zt_valid_id(zt_own) && zt_net != zt_own) {
+            /* Own network is the current one on a host device. */
+            zt_net = zt_own;
+            changed = true;
+        }
+        if (changed) save_cfg();
         zt.st = d->st;
         zt.members = d->members;
         if (zt.msel >= (int)zt.members.size()) zt.msel = 0;
@@ -79,6 +95,10 @@ void App::poll_async() {
         lan_scan_pending = false;
         scan_lan();
     }
+    if (!async.busy() && lobby_refresh_pending) {
+        lobby_refresh_pending = false;
+        refresh();
+    }
 }
 
 struct ZtCreateData {
@@ -90,7 +110,7 @@ struct ZtCreateData {
 };
 
 void App::zt_create_own() {
-    if (async.busy()) return;
+    if (async.busy()) { show_toast(L("正在处理，请稍候", "Busy, please wait")); return; }
     busy = L("正在创建 ZeroTier 网络…", "Creating ZeroTier network…");
     auto d = std::make_shared<ZtCreateData>();
     async.start([this, d] {
@@ -149,7 +169,8 @@ void App::member_move(int d) {
 }
 
 void App::member_toggle() {
-    if (async.busy() || zt.msel >= (int)zt.members.size()) return;
+    if (zt.msel >= (int)zt.members.size()) return;
+    if (async.busy()) { show_toast(L("正在处理，请稍候", "Busy, please wait")); return; }
     const std::string id = zt.members[zt.msel].id;
     const bool auth = !zt.members[zt.msel].authorized;
     const std::string own = zt_own;
@@ -169,7 +190,7 @@ void App::member_delete() {
     std::string id = zt.members[zt.msel].id;
     if (zt.confirm == "del:" + id && SDL_GetTicks() < zt.confirm_until) {
         zt.confirm.clear();
-        if (async.busy()) return;
+        if (async.busy()) { show_toast(L("正在处理，请稍候", "Busy, please wait")); return; }
         const std::string own = zt_own;
         auto d = std::make_shared<std::vector<ZtMember> >();
         async.start([this, id, own, d] {
@@ -191,7 +212,7 @@ void App::member_delete() {
 void App::member_clear() {
     if (zt.confirm == "clear" && SDL_GetTicks() < zt.confirm_until) {
         zt.confirm.clear();
-        if (async.busy()) return;
+        if (async.busy()) { show_toast(L("正在处理，请稍候", "Busy, please wait")); return; }
         const std::string own = zt_own;
         std::vector<std::string> ids;
         for (auto &m : zt.members) ids.push_back(m.id);
@@ -233,7 +254,7 @@ struct ZtJoinData {
 };
 
 void App::zt_join_current(bool leave_if_joined) {
-    if (async.busy()) return;
+    if (async.busy()) { show_toast(L("正在处理，请稍候", "Busy, please wait")); return; }
     busy = L("正在连接 ZeroTier…", "Contacting ZeroTier…");
     auto d = std::make_shared<ZtJoinData>();
     const std::string net = zt_net;
@@ -270,6 +291,8 @@ void App::zt_join_current(bool leave_if_joined) {
         zt.st = d->st;
         if (d->left)
             show_toast(L("已离开 ZeroTier 网络", "Left ZeroTier network"));
+        else if (d->st.ok)
+            show_toast(L("已连接", "Connected") + (d->st.ip.empty() ? "" : " " + d->st.ip));
         else
             show_toast(d->st.found ? L("等待主机授权（按 A 刷新）", "Waiting for host approval (A to refresh)")
                                    : L("已请求加入，等待主机授权", "Join requested; waiting for approval"));

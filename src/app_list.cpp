@@ -60,7 +60,7 @@ struct LobbyRefreshData {
 };
 
 void App::refresh() {
-    if (async.busy()) return;
+    if (async.busy()) { lobby_refresh_pending = true; return; }
     loading = true;
     status = L("正在连接 lobby…", "Contacting lobby…");
     auto d = std::make_shared<LobbyRefreshData>();

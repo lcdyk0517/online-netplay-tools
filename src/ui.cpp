@@ -194,9 +194,14 @@ void App::draw_settings() {
         else if (id == 5) {
             label = L("ZeroTier", "ZeroTier");
             value = zt_state_text();
-            if (zt.st.state == "notjo")
-                value += zt_valid_id(zt_net) ? L(" · 按 A 加入网络", " · A to join")
-                                             : L(" · 按 A 输入网络 ID", " · A to enter network ID");
+            if (zt.st.state == "notjo") {
+                if (zt_host && zt_valid_id(zt_own))
+                    value += L(" · 按 A 加入本机网络", " · A to join hosted network");
+                else if (zt_valid_id(zt_net))
+                    value += L(" · 按 A 加入网络", " · A to join");
+                else
+                    value += L(" · 按 A 输入网络 ID", " · A to enter network ID");
+            }
         }
         else if (id == 6) { label = zt_host ? L("成员管理", "Members")
                                             : L("创建本机网络", "Create local network");
@@ -229,27 +234,37 @@ void App::draw_editor() {
     round({bx, by, bw, 46}, 10, CHIP);
     std::string shown = (set.target == 3 || set.target == 4) ? std::string(set.buf.size(), '*') : set.buf;
     text(f22, shown + "_", bx + 14, by + 8, TXT, bw - 28);
-    int cols = 13, kw = (bw - (cols - 1) * 4) / cols, kh = 40, gy = by + 62;
-    for (int row = 0; row < 5; row++) {
-        int len = (int)strlen(OSK_ROWS[row]);
+    const bool hex = (set.target == 2);
+    int cols = hex ? 8 : 13;
+    int kw = (bw - (cols - 1) * 4) / cols, kh = 40, gy = by + 62;
+    int rows = hex ? 2 : 5;
+    for (int row = 0; row < rows; row++) {
+        const char *keys = hex ? NETID_ROWS[row] : OSK_ROWS[row];
+        int len = (int)strlen(keys);
         for (int col = 0; col < len; col++) {
             SDL_Rect k{bx + col * (kw + 4), gy + row * (kh + 4), kw, kh};
             bool on = set.row == row && set.col == col;
             round(k, 8, on ? ACCENT : CHIP);
-            std::string s(1, OSK_ROWS[row][col]);
+            std::string s(1, keys[col]);
             int tw = 0; TTF_SizeUTF8(f18, s.c_str(), &tw, nullptr);
             text(f18, s, k.x + (kw - tw) / 2, k.y + 8, on ? CARD : TXT);
         }
     }
-    const char *labels[6] = { "|", L("空格", "Space"), L("删除", "Del"), L("清空", "Clear"),
-                              L("确定", "OK"), L("取消", "Cancel") };
-    int spw = (bw - 5 * 6) / 6, sy = gy + 5 * (kh + 4) + 6;
-    for (int i = 0; i < 6; i++) {
+    const char *labels_full[6] = { "|", L("空格", "Space"), L("删除", "Del"), L("清空", "Clear"),
+                                   L("确定", "OK"), L("取消", "Cancel") };
+    const char *labels_hex[4] = { L("删除", "Del"), L("清空", "Clear"),
+                                  L("确定", "OK"), L("取消", "Cancel") };
+    int nlabels = hex ? 4 : 6;
+    int spw = (bw - (nlabels - 1) * 6) / nlabels;
+    int sy = gy + rows * (kh + 4) + 6;
+    int action_row = rows;
+    for (int i = 0; i < nlabels; i++) {
         SDL_Rect k{bx + i * (spw + 6), sy, spw, 42};
-        bool on = set.row == 5 && set.col == i;
+        bool on = set.row == action_row && set.col == i;
         round(k, 8, on ? ACCENT : CHIP);
-        int tw = 0; TTF_SizeUTF8(f18, labels[i], &tw, nullptr);
-        text(f18, labels[i], k.x + (spw - tw) / 2, k.y + 9, on ? CARD : TXT);
+        const char *lab = hex ? labels_hex[i] : labels_full[i];
+        int tw = 0; TTF_SizeUTF8(f18, lab, &tw, nullptr);
+        text(f18, lab, k.x + (spw - tw) / 2, k.y + 9, on ? CARD : TXT);
     }
     text(f16, L("A 输入 · B 删除 · Y 完成 · X 取消", "A type · B del · Y done · X cancel"),
          x + 24, y + h - 34, MUTED);

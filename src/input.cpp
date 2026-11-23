@@ -106,7 +106,9 @@ int run_app(App &app) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) { run = false; break; }
-            if (app.async.busy()) continue;  /* a background job owns the state */
+            /* Only modal work (create/join) takes over input; ordinary
+             * background refreshes must not swallow key presses. */
+            if (!app.busy.empty()) continue;
             if (e.type == SDL_KEYDOWN) {
                 SDL_Keycode k = e.key.keysym.sym;
                 if (k == SDLK_ESCAPE) back();

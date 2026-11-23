@@ -7,6 +7,9 @@
 
 const char *OSK_ROWS[5] = {
     "ABCDEFGHIJKLM", "NOPQRSTUVWXYZ", "abcdefghijklm", "nopqrstuvwxyz", "0123456789-.:" };
+/* ZeroTier network IDs are 16 lowercase hex digits; a compact keypad makes
+ * entering them much faster than the full keyboard. */
+const char *NETID_ROWS[2] = { "01234567", "89abcdef" };
 
 void App::text(TTF_Font *f, const std::string &s, int x, int y, SDL_Color c, int maxw) {
     if (s.empty()) return;

@@ -231,19 +231,39 @@ std::vector<ZtMember> zt_fetch_members(const std::string &nwid) {
     std::vector<ZtMember> out;
     std::string resp, err;
     if (!zt_api("GET", "/controller/network/" + nwid + "/member", "", resp, err)) return out;
-    JsonReader ids(resp);
-    if (!ids.eat('[')) return out;
+    /* Newer controllers answer with an array of IDs, older ones with an
+     * object map {"id":revision,...}. Accept both. */
     std::vector<std::string> list;
-    while (true) {
-        ids.ws();
-        if (ids.i >= ids.s.size()) break;
-        if (ids.s[ids.i] == ']') break;
-        std::string id;
-        if (!ids.str(id)) break;
-        if (id.size() == 10) list.push_back(id);
-        ids.ws();
-        if (ids.i < ids.s.size() && ids.s[ids.i] == ',') { ids.i++; continue; }
-        break;
+    JsonReader ids(resp);
+    ids.ws();
+    if (ids.i < ids.s.size() && ids.s[ids.i] == '[') {
+        ids.i++;
+        while (true) {
+            ids.ws();
+            if (ids.i >= ids.s.size() || ids.s[ids.i] == ']') break;
+            std::string id;
+            if (!ids.str(id)) break;
+            if (id.size() == 10) list.push_back(id);
+            ids.ws();
+            if (ids.i < ids.s.size() && ids.s[ids.i] == ',') { ids.i++; continue; }
+            break;
+        }
+    } else if (ids.i < ids.s.size() && ids.s[ids.i] == '{') {
+        ids.i++;
+        while (true) {
+            ids.ws();
+            if (ids.i >= ids.s.size() || ids.s[ids.i] == '}') break;
+            std::string id;
+            if (!ids.str(id)) break;
+            if (!ids.eat(':')) break;
+            ids.skip_value();
+            if (id.size() == 10) list.push_back(id);
+            ids.ws();
+            if (ids.i < ids.s.size() && ids.s[ids.i] == ',') { ids.i++; continue; }
+            break;
+        }
+    } else {
+        return out;
     }
     for (auto &id : list) {
         ZtMember m;
@@ -252,9 +272,12 @@ std::vector<ZtMember> zt_fetch_members(const std::string &nwid) {
         if (zt_api("GET", "/controller/network/" + nwid + "/member/" + id, "", obj, e2)) {
             std::string v;
             if (json_object_field(obj, "authorized", v)) m.authorized = (v == "true");
-            if (json_string_array_first(obj, "ipAssignments", v) &&
-                v.find('.') != std::string::npos)
-                m.ip = v;
+            std::vector<std::string> ips;
+            if (json_string_array(obj, "ipAssignments", ips)) {
+                /* Old assignments can linger in front of the current one. */
+                for (auto &ip : ips)
+                    if (ip.find('.') != std::string::npos) m.ip = ip;
+            }
         }
         out.push_back(m);
     }

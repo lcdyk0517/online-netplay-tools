@@ -136,6 +136,7 @@ int main(int argc, char **argv) {
     if (getenv("RA_LOBBY_ZH")) zh = true;
 #endif
     load_ra_all();
+    app.refresh_zt_async();  /* adopt/keep the hosted network if the daemon runs */
     scan_es_games(app.names);
     scan_playlists(app.crcs);
     app.cores = scan_cores();
@@ -150,7 +151,11 @@ int main(int argc, char **argv) {
     if (const char *sc = getenv("RA_LOBBY_SHOT_SCREEN")) {
         app.screen = atoi(sc);
         if (app.screen == 1) { app.open_settings(); app.set.sel = 1; }
-        if (app.screen == 2) app.open_editor(0);
+        if (app.screen == 2) {
+            int et = getenv("RA_LOBBY_EDITOR_TARGET") ? atoi(getenv("RA_LOBBY_EDITOR_TARGET")) : 0;
+            app.open_editor(et);
+            if (et == 2) app.set.buf = "15228b9233";
+        }
         if (app.screen == 3 || app.screen == 4) {
             if (app.host.systems.empty()) {
                 EsSystem sy;
@@ -188,7 +193,8 @@ int main(int argc, char **argv) {
         app.draw();
     }
     if (const char *shot = getenv("RA_LOBBY_SHOT")) {
-        for (int i = 0; i < 400 && (app.async.busy() || app.zt_refresh_pending); i++) {
+        for (int i = 0; i < 400 && (app.async.busy() || app.zt_refresh_pending ||
+                                   app.lan_scan_pending || app.lobby_refresh_pending); i++) {
             app.poll_async();
             SDL_Delay(50);
         }

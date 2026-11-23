@@ -13,11 +13,13 @@
 #include "zerotier.h"
 
 extern const char *OSK_ROWS[5];
+extern const char *NETID_ROWS[2];
 
 struct App {
     AsyncTask async;
     bool zt_refresh_pending = false;
     bool lan_scan_pending = false;
+    bool lobby_refresh_pending = false;
 
     ~App();
     void close_fonts();

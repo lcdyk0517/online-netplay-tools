@@ -79,20 +79,20 @@ void App::settings_change() {
         if (zt_host) show_toast(L("本机网络，成员在成员管理里", "Hosted here; see Members"));
         else open_editor(2);
         break;
-    case 5:
-        if (zt_host && zt_net == zt_own) {
-            refresh_zt_async();
-            show_toast(L("本机网络已连接", "Hosted network is up"));
-            break;
-        }
-        if (!zt_valid_id(zt_net)) {
+    case 5: {
+        /* On a host this row always means "our own network"; joining some
+         * other network has its own entry. Never ask for a known ID. */
+        std::string net = (zt_host && zt_valid_id(zt_own)) ? zt_own : zt_net;
+        if (!zt_valid_id(net)) {
             zt.join_after_edit = true;
             open_editor(2);
             set.buf.clear();
         } else {
+            if (net != zt_net) { zt_net = net; save_cfg(); }
             zt_action();
         }
         break;
+    }
     case 6:
         if (zt_host) open_member_screen();
         else zt_create_own();
@@ -118,6 +118,12 @@ void App::settings_change() {
 }
 
 void App::editor_move(int dx, int dy) {
+    if (set.target == 2) {
+        set.row = (set.row + dy + 3) % 3;
+        int len = set.row < 2 ? 8 : 4;
+        set.col = (set.col + dx + len) % len;
+        return;
+    }
     int len = set.row < 5 ? 13 : 6;
     set.col = (set.col + dx + len) % len;
     set.row = (set.row + dy + 6) % 6;
@@ -128,7 +134,15 @@ void App::editor_finish() {
     if (set.target == 0) { if (!set.buf.empty()) nick = set.buf; }
     else if (set.target == 1) custom_mitm = set.buf;
     else if (set.target == 2) {
-        zt_net = lower(set.buf);
+        std::string id;
+        for (char c : set.buf)
+            if (isxdigit((unsigned char)c)) id += (char)tolower((unsigned char)c);
+        if (id.size() != 16) {
+            show_toast(L("网络 ID 需 16 位十六进制", "Network ID must be 16 hex digits"));
+            return;
+        }
+        set.buf = id;
+        zt_net = id;
         if (zt.join_after_edit) {
             zt.join_after_edit = false;
             zt_join_current(false);
@@ -161,6 +175,20 @@ void App::editor_cancel() {
 }
 
 void App::editor_activate() {
+    if (set.target == 2) {
+        if (set.row < 2) {
+            if (set.buf.size() < 16)
+                set.buf += NETID_ROWS[set.row][set.col];
+            return;
+        }
+        switch (set.col) {
+        case 0: if (!set.buf.empty()) set.buf.pop_back(); break;
+        case 1: set.buf.clear(); break;
+        case 2: editor_finish(); break;
+        case 3: editor_cancel(); break;
+        }
+        return;
+    }
     if (set.row < 5) {
         size_t maxlen = set.target == 0 ? 24 : (set.target == 1 ? 64 : (set.target == 2 ? 16 : 64));
         if (set.buf.size() < maxlen) set.buf += OSK_ROWS[set.row][set.col];
