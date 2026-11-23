@@ -5,6 +5,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <fstream>
+#include <initializer_list>
 #include <map>
 #include <sstream>
 #include <string>
@@ -116,20 +117,57 @@ LocalGame find_game(const std::string &name, const std::string &crc,
 }
 
 std::string find_core(const std::string &corename, const std::map<std::string, CoreRef> &cores, std::string &out32) {
+    auto resolve = [&](std::map<std::string, CoreRef>::const_iterator it) -> std::string {
+        out32 = it->second.path32;
+        return it->second.path64.empty() ? it->second.path32 : it->second.path64;
+    };
+    auto pick = [&](std::initializer_list<const char *> names) -> std::string {
+        for (const char *nm : names) {
+            auto j = cores.find(nm);
+            if (j != cores.end()) return resolve(j);
+        }
+        return "";
+    };
+
     std::string n = norm(corename);
     auto it = cores.find(corename);
     if (it == cores.end()) {
         for (auto &kv : cores) if (norm(kv.first) == n) { it = cores.find(kv.first); break; }
     }
-    if (it == cores.end()) {
+    if (it != cores.end()) return resolve(it);
+
+    /* RetroArch advertises the core's library_name (netplay_frontend.c uses
+     * system->library_name), which for several cores does not match the .so
+     * filename. Normalise the common renames and retry so an installed core
+     * is never reported as missing. */
+    if (n == "finalburnneo" || n == "finalburnneoplus" || n == "fbneoplus" ||
+        n == "fbneo" || n == "finalburn") {
+        std::string r = pick({ "fbneo", "fbneo_plus", "fbneo_32b", "fbalpha2012_32b" });
+        if (!r.empty()) return r;
+    }
+    if (n.rfind("beetle", 0) == 0) {
+        std::string a = "mednafen" + n.substr(6);
+        auto j = cores.find(a);
+        if (j != cores.end()) return resolve(j);
+        /* Prefer an exact-normalised match, then the most specific (longest)
+         * candidate so "Beetle PCE Fast" does not collapse onto "PCE". */
+        for (auto &kv : cores) if (norm(kv.first) == a) return resolve(cores.find(kv.first));
+        std::map<std::string, CoreRef>::const_iterator best = cores.end();
+        size_t bestLen = 0;
         for (auto &kv : cores) {
             std::string k = norm(kv.first);
-            if (k.find(n) != std::string::npos || n.find(k) != std::string::npos) { it = cores.find(kv.first); break; }
+            if (k.find(a) == std::string::npos && a.find(k) == std::string::npos) continue;
+            if (k.size() > bestLen) { bestLen = k.size(); best = cores.find(kv.first); }
         }
+        if (best != cores.end()) return resolve(best);
     }
-    if (it == cores.end()) return "";
-    out32 = it->second.path32;
-    return it->second.path64.empty() ? it->second.path32 : it->second.path64;
+
+    for (auto &kv : cores) {
+        std::string k = norm(kv.first);
+        if (k.find(n) != std::string::npos || n.find(k) != std::string::npos) { it = cores.find(kv.first); break; }
+    }
+    if (it != cores.end()) return resolve(it);
+    return "";
 }
 
 
