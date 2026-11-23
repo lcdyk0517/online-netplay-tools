@@ -1,0 +1,127 @@
+#pragma once
+
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
+#include <map>
+#include <string>
+#include <vector>
+
+#include "content.h"
+#include "lobby.h"
+#include "zerotier.h"
+
+extern const char *OSK_ROWS[5];
+
+struct App {
+    SDL_Renderer *r = nullptr;
+    TTF_Font *f28 = nullptr, *f22 = nullptr, *f18 = nullptr, *f16 = nullptr;
+    std::vector<Room> rooms;
+    std::map<std::string, std::string> names, crcs;
+    std::map<std::string, CoreRef> cores;
+    std::vector<int> filtered;
+    int filter = 0, sel = 0, scroll = 0;
+    bool loading = false, loaded = false;
+    std::string status;
+    Uint32 last_refresh = 0;
+    std::string toast;
+    Uint32 toast_until = 0;
+    std::string busy;   // modal "please wait" text while a blocking action runs
+    std::string pad_name;
+    int rows = 6;
+
+    // 0 list, 1 settings, 2 on-screen keyboard, 3 host, 4 game picker, 5 core picker
+    int screen = 0;
+    int ssel = 0;
+    bool use_mitm = false;
+    std::string mitm_server = "nyc";
+    std::string custom_mitm;
+    bool announce = true;  // RA's default for netplay_public_announce
+    std::string join_pass; // room password typed in our own OSK
+    Room pending_room;
+    bool has_pending = false;
+    std::string zt_net;    // network we join/use now (ra-lobby.cfg ZTNET=)
+    std::string zt_own;    // network created on this device (ZTOWN=)
+    bool zt_host = false;  // this device is the network controller (ZTHOST=1)
+    bool join_after_edit = false;
+    ZtStatus zt_st;
+    std::map<std::string, bool> dir_has_cache;
+    std::vector<ZtMember> zt_members_list;
+    int zt_msel = 0, zt_mscroll = 0;
+    std::string zt_confirm;          // pending destructive action (double press)
+    Uint32 zt_confirm_until = 0;
+    int edit_target = 0;
+    std::string edit_buf;
+    int erow = 0, ecol = 0;
+    std::vector<EsSystem> systems;        // hostable systems (es_systems order, sorted by alias)
+    std::vector<GameEntry> sys_games;     // games of the selected system
+    std::vector<std::string> sys_cores;   // hostable cores of the selected system
+    int hsys = -1;
+    int hsel = 0;
+    bool lan_only = false;
+    bool host_pass_on = false;            // require a password for the room we host
+    std::string host_pass;
+    std::string hgame_name, hgame_path, hcore;
+    int pick_kind = 0;                    // 0 system, 1 game, 2 core
+    int pick_sel = 0, pick_scroll = 0;
+
+    void text(TTF_Font *f, const std::string &s, int x, int y, SDL_Color c, int maxw = 0);
+    void fill(SDL_Rect rc, SDL_Color c);
+    void round(SDL_Rect rc, int rad, SDL_Color c);
+
+    // ZeroTier
+    void zt_adopt_own();
+    void zt_refresh_members();
+    int zt_pending() const;
+    void zt_create_own();
+    void open_member_screen();
+    void member_move(int d);
+    void member_toggle();
+    void member_delete();
+    void member_clear();
+    std::string zt_state_text() const;
+    void zt_join_current(bool leave_if_joined);
+    void zt_action();
+
+    // settings / on-screen keyboard
+    void open_settings();
+    int relay_idx() const;
+    void set_relay_idx(int i);
+    std::string relay_label(int i) const;
+    std::vector<int> settings_rows() const;
+    void settings_move(int d);
+    void open_editor(int target);
+    void settings_change();
+    void editor_move(int dx, int dy);
+    void editor_finish();
+    void editor_cancel();
+    void editor_activate();
+
+    // hosting (driven by es_systems.cfg)
+    void build_systems();
+    void build_sys_games();
+    void select_system(int idx);
+    std::string system_alias() const;
+    int picker_count() const;
+    void picker_move(int d);
+    void picker_choose();
+    void host_move(int d);
+    void host_change();
+    void host_launch();
+
+    // lobby list
+    void apply_filter();
+    void set_page(int p);
+    void scan_lan();
+    void refresh();
+    void show_toast(const std::string &s);
+    void request_join(const Room &rm);
+    void join_room(const Room &rm, const std::string &pass);
+
+    // drawing
+    void draw();
+    void draw_settings();
+    void draw_editor();
+    void draw_members();
+    void draw_host();
+    void draw_picker();
+};
