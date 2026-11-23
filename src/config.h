@@ -19,6 +19,12 @@ extern std::string zt_net;   // network in use now
 extern std::string zt_own;   // network created on this device
 extern bool zt_host;         // this device is the controller
 
+// Optional short-code lookup service base URL (empty = disabled) and the code
+// last published for zt_own.
+extern std::string short_url;
+extern std::string zt_short;
+extern long long zt_short_exp;   // unix time when zt_short stops resolving
+
 bool cfg_get(const char *path, const std::string &key, std::string &out);
 void cfg_set(const char *path, const std::string &key, const std::string &value);
 

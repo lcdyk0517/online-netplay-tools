@@ -1,11 +1,13 @@
 #include "app.h"
 
 #include <algorithm>
+#include <ctime>
 #include <string>
 #include <unistd.h>
 
 #include "config.h"
 #include "i18n.h"
+#include "shortcode.h"
 #include "theme.h"
 
 
@@ -55,6 +57,10 @@ void App::refresh_zt_async() {
         /* A host stays joined to its own network; only do this when the
          * daemon is already running so opening the tool never starts it. */
         if (is_host && zt_valid_id(host_net) && zt_daemon_up()) {
+            if (!zt_tun_ok()) {
+                bool tun_missing = true;
+                if (zt_tun_ensure() && tun_missing) zt_restart_daemon();
+            }
             zt_cli("join", host_net);
             usleep(300000);
         }
@@ -65,10 +71,12 @@ void App::refresh_zt_async() {
             d->members = zt_fetch_members(host_net);
     }, [this, d] {
         bool changed = false;
+        bool became_host = false;
         if (!d->adopt.empty() && !zt_host) {
             zt_own = d->adopt;
             zt_host = true;
             changed = true;
+            became_host = true;
         }
         if (zt_host && zt_valid_id(zt_own) && zt_net != zt_own) {
             /* Own network is the current one on a host device. */
@@ -79,6 +87,8 @@ void App::refresh_zt_async() {
         zt.st = d->st;
         zt.members = d->members;
         if (zt.msel >= (int)zt.members.size()) zt.msel = 0;
+        if (became_host && !short_url.empty() && (zt_short.empty() || zt_short_exp <= 0))
+            short_publish_own(true);
     });
 }
 
@@ -90,6 +100,10 @@ void App::poll_async() {
     if (zt_refresh_pending) {
         zt_refresh_pending = false;
         refresh_zt_async();
+    }
+    if (!async.busy() && short_pub_pending) {
+        short_pub_pending = false;
+        short_publish_own(true);
     }
     if (!async.busy() && lan_scan_pending) {
         lan_scan_pending = false;
@@ -105,6 +119,8 @@ struct ZtCreateData {
     bool ok = false;
     int err = 0;  // 1 not installed, 2 tun, 3 daemon, 4 node id, 5 create
     std::string nw;
+    std::string scode;   // short code published for this network
+    long long sexp = 0;
     ZtStatus st;
     std::vector<ZtMember> members;
 };
@@ -116,7 +132,9 @@ void App::zt_create_own() {
     async.start([this, d] {
         if (async.cancelled()) return;
         if (!zt_installed()) { d->err = 1; return; }
+        bool tun_missing = !zt_tun_ok();
         if (!zt_tun_ensure()) { d->err = 2; return; }
+        if (tun_missing && zt_daemon_up()) zt_restart_daemon();
         if (!zt_ensure_daemon()) { d->err = 3; return; }
         ZtStatus st = zt_status("");
         if (st.node.size() != 10) { d->err = 4; return; }
@@ -129,6 +147,10 @@ void App::zt_create_own() {
         d->members = zt_fetch_members(nw);
         d->st = zt_status(nw);
         d->nw = nw;
+        if (!short_url.empty()) {
+            std::string e;
+            short_publish(nw, d->scode, e, &d->sexp);  /* best effort */
+        }
         d->ok = true;
     }, [this, d] {
         busy.clear();
@@ -145,10 +167,13 @@ void App::zt_create_own() {
         zt_net = d->nw;
         zt_own = d->nw;
         zt_host = true;
+        zt_short = d->scode;
+        zt_short_exp = d->sexp;
         save_cfg();
         zt.st = d->st;
         zt.members = d->members;
-        show_toast(L("已创建网络 ", "Network created ") + d->nw);
+        show_toast(L("已创建网络 ", "Network created ") + d->nw +
+                   (d->scode.empty() ? "" : L(" · 短码 ", " · code ") + d->scode));
     });
 }
 
@@ -264,7 +289,9 @@ void App::zt_join_current(bool leave_if_joined) {
         if (async.cancelled()) return;
         if (!zt_valid_id(net)) { d->err = 1; return; }
         if (!zt_installed()) { d->err = 2; return; }
+        bool tun_missing = !zt_tun_ok();
         if (!zt_tun_ensure()) { d->err = 3; return; }
+        if (tun_missing && zt_daemon_up()) zt_restart_daemon();
         if (!zt_ensure_daemon()) { d->err = 4; return; }
         if (async.cancelled()) return;
         ZtStatus st = zt_status(net);
@@ -301,3 +328,72 @@ void App::zt_join_current(bool leave_if_joined) {
 }
 
 void App::zt_action() { zt_join_current(true); }
+
+struct ShortJoinData {
+    bool ok = false;
+    std::string nwid, err;
+};
+
+void App::zt_join_by_code(const std::string &code) {
+    if (async.busy()) { show_toast(L("正在处理，请稍候", "Busy, please wait")); return; }
+    if (short_url.empty()) {
+        show_toast(L("未设置短码服务地址", "Short-code service not configured"));
+        return;
+    }
+    busy = L("正在解析短码…", "Resolving code…");
+    auto d = std::make_shared<ShortJoinData>();
+    async.start([this, code, d] {
+        if (async.cancelled()) return;
+        d->ok = short_resolve(code, d->nwid, d->err);
+    }, [this, d] {
+        busy.clear();
+        if (!d->ok) {
+            show_toast(d->err.empty() ? L("短码无效", "Invalid code") : d->err);
+            return;
+        }
+        zt_net = d->nwid;
+        save_cfg();
+        show_toast(L("短码 → ", "Code → ") + d->nwid);
+        zt_join_current(false);
+    });
+}
+
+struct ShortPubData {
+    bool ok = false;
+    std::string code, err;
+    long long exp = 0;
+};
+
+void App::short_publish_own(bool silent) {
+    const std::string nw = (zt_host && zt_valid_id(zt_own)) ? zt_own : zt_net;
+    if (!zt_valid_id(nw)) {
+        show_toast(L("先创建或加入一个网络", "Create or join a network first"));
+        return;
+    }
+    if (short_url.empty()) {
+        if (!silent) show_toast(L("先设置短码服务地址", "Set the short-code service URL first"));
+        return;
+    }
+    if (async.busy()) {
+        if (silent) short_pub_pending = true;
+        else show_toast(L("正在处理，请稍候", "Busy, please wait"));
+        return;
+    }
+    if (!silent) busy = L("正在生成短码…", "Publishing code…");
+    auto d = std::make_shared<ShortPubData>();
+    async.start([this, nw, d] {
+        if (async.cancelled()) return;
+        d->ok = short_publish(nw, d->code, d->err, &d->exp);
+    }, [this, d, silent] {
+        if (!silent) busy.clear();
+        if (!d->ok) {
+            if (!silent)
+                show_toast(d->err.empty() ? L("短码生成失败", "Publish failed") : d->err);
+            return;
+        }
+        zt_short = d->code;
+        zt_short_exp = d->exp;
+        save_cfg();
+        show_toast(L("短码 ", "Code ") + d->code + L("（10 分钟内有效）", " (valid 10 min)"));
+    });
+}

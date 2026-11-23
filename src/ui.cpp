@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <ctime>
 #include <string>
 
 #include "config.h"
@@ -157,6 +158,7 @@ void App::draw() {
     else if (screen == 3) draw_host();
     else if (screen == 4) draw_picker();
     else if (screen == 5) draw_members();
+    else if (screen == 6) draw_choice();
     if (!busy.empty()) {
         fill({0, 0, SW, SH}, DIM);
         int tw = 0;
@@ -171,7 +173,7 @@ void App::draw() {
 
 void App::draw_settings() {
     fill({0, 0, SW, SH}, DIM);
-    int w = std::min(SW - 100, 760), h = std::min(SH - 80, 600);
+    int w = std::min(SW - 100, 760), h = std::min(SH - 60, 680);
     int x = (SW - w) / 2, y = (SH - h) / 2;
     round({x, y, w, h}, 18, CARD);
     text(f28, L("设置", "Settings"), x + 28, y + 20, TXT);
@@ -190,7 +192,13 @@ void App::draw_settings() {
         else if (id == 4) { label = zt_host ? L("本机网络 ID", "Hosted network ID")
                                             : L("当前网络 ID", "Current network ID");
                             value = (zt_host ? zt_own : zt_net).empty()
-                                  ? L("未设置", "Not set") : (zt_host ? zt_own : zt_net); }
+                                  ? L("未设置", "Not set") : (zt_host ? zt_own : zt_net);
+                            if (zt_host && !zt_short.empty()) {
+                                long long now = (long long)time(nullptr);
+                                value += L(" · 短码 ", " · code ") + zt_short;
+                                if (zt_short_exp > now)
+                                    value += " (" + std::to_string((zt_short_exp - now) / 60) + "m)";
+                            } }
         else if (id == 5) {
             label = L("ZeroTier", "ZeroTier");
             value = zt_state_text();
@@ -207,7 +215,19 @@ void App::draw_settings() {
                                             : L("创建本机网络", "Create local network");
                             value = zt_host ? std::to_string(zt_pending()) + L(" 台待授权", " pending") : ""; }
         else if (id == 7) { label = L("刷新 ZeroTier", "Refresh ZeroTier"); }
-        else if (id == 9) { label = L("加入 ZeroTier 网络", "Join a ZeroTier network"); }
+        else if (id == 9) { label = L("加入网络 (ID/短码)", "Join by ID/code"); }
+        else if (id == 10) { label = L("短码服务", "Short-code service");
+                             value = short_url.empty() ? L("未设置", "Not set") : short_url; }
+        else if (id == 11) { label = L("刷新短码", "Refresh code");
+                             if (zt_short.empty()) value = L("未生成", "None");
+                             else {
+                                 long long now = (long long)time(nullptr);
+                                 value = zt_short;
+                                 if (zt_short_exp > now)
+                                     value += L(" · 剩 ", " · ") + std::to_string((zt_short_exp - now) / 60) + L(" 分", " min");
+                                 else
+                                     value += L(" · 已过期", " · expired");
+                             } }
         else { label = L("保存并返回", "Save and back"); }
         text(f22, label, row.x + 18, row.y + 12, TXT);
         if (!value.empty()) text(f18, value, row.x + 250, row.y + 14, ACCENT_D, row.w - 280);
@@ -227,7 +247,8 @@ void App::draw_editor() {
     round({x, y, w, h}, 18, CARD);
     const char *etitle = set.target == 0 ? L("用户名", "Nickname")
                        : set.target == 1 ? L("自定义中继 (host|port)", "Custom relay (host|port)")
-                       : set.target == 2 ? L("ZeroTier 网络 ID", "ZeroTier network ID")
+                       : set.target == 2 ? L("网络 ID (16 位) / 短码 (3-6 位)", "Network ID (16) / code (3-6)")
+                       : set.target == 5 ? L("短码服务地址 (https://…)", "Short-code service URL (https://…)")
                                           : L("房间密码", "Room password");
     text(f28, etitle, x + 24, y + 18, TXT);
     int bx = x + 24, by = y + 66, bw = w - 48;
@@ -344,6 +365,35 @@ void App::draw_host() {
          x + 28, y + h - 34, MUTED);
 }
 
+
+void App::draw_choice() {
+    fill({0, 0, SW, SH}, DIM);
+    const int n = 6;
+    int vis = std::max(3, (SH - 220) / 44);
+    int rows = std::min(n, vis);
+    int w = std::min(SW - 100, 700), h = rows * 44 + 132;
+    int x = (SW - w) / 2, y = (SH - h) / 2;
+    round({x, y, w, h}, 18, CARD);
+    text(f28, L("中继服务器", "Relay server"), x + 24, y + 18, TXT);
+    int ly = y + 66;
+    int current = relay_idx();
+    for (int i = 0; i < rows; i++) {
+        int idx = choice.scroll + i;
+        if (idx >= n) break;
+        SDL_Rect row{x + 16, ly + i * 44, w - 32, 40};
+        if (idx == choice.sel) {
+            round(row, 8, SEL_BG);
+            fill({row.x, row.y + 6, 4, row.h - 12}, ACCENT);
+        }
+        text(f18, relay_label(idx), row.x + 14, row.y + 8, TXT, row.w - 120);
+        if (idx == current) {
+            const char *cur = L("当前", "Current");
+            int cw = 0; TTF_SizeUTF8(f16, cur, &cw, nullptr);
+            text(f16, cur, row.x + row.w - 14 - cw, row.y + 11, ACCENT_D);
+        }
+    }
+    text(f16, L("A 选择 · B 返回", "A select · B back"), x + 24, y + h - 30, MUTED);
+}
 
 void App::draw_picker() {
     fill({0, 0, SW, SH}, DIM);

@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -22,6 +23,9 @@ std::string proxy;
 std::string zt_net;
 std::string zt_own;
 bool zt_host = false;
+std::string short_url;
+std::string zt_short;
+long long zt_short_exp = 0;
 
 static std::string esc_cfg(const std::string &v) {
     std::string o;
@@ -100,6 +104,9 @@ void load_cfg() {
             if (line.rfind("ZTNET=", 0) == 0) zt_net = lower(line.substr(6));
             if (line.rfind("ZTOWN=", 0) == 0) zt_own = lower(line.substr(6));
             if (line.rfind("ZTHOST=", 0) == 0) zt_host = (line.substr(7) == "1");
+            if (line.rfind("SHORTURL=", 0) == 0 && line.size() > 9) short_url = line.substr(9);
+            if (line.rfind("ZTSHORT=", 0) == 0 && line.size() > 8) zt_short = lower(line.substr(8));
+            if (line.rfind("ZTSHORTEXP=", 0) == 0) zt_short_exp = atoll(line.substr(11).c_str());
         }
         if (zt_host && zt_own.empty()) zt_own = zt_net;
 }
@@ -114,6 +121,8 @@ bool save_cfg() {
     std::string px = clean(proxy);
     std::string zn = clean(zt_net);
     std::string zo = clean(zt_own);
+    std::string su = clean(short_url);
+    std::string sc = clean(lower(zt_short));
     mkdir("/home/ark/.config", 0755);
     std::string tmp = "/home/ark/.config/ra-lobby.cfg.tmp";
     std::ofstream out(tmp);
@@ -123,6 +132,9 @@ bool save_cfg() {
     if (!zn.empty()) out << "ZTNET=" << zn << "\n";
     if (!zo.empty()) out << "ZTOWN=" << zo << "\n";
     out << "ZTHOST=" << (zt_host ? "1" : "0") << "\n";
+    if (!su.empty()) out << "SHORTURL=" << su << "\n";
+    if (!sc.empty()) out << "ZTSHORT=" << sc << "\n";
+    if (zt_short_exp > 0) out << "ZTSHORTEXP=" << zt_short_exp << "\n";
     out.flush();
     if (!out) return false;
     out.close();

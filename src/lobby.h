@@ -20,6 +20,10 @@ bool is_mitm(const Room &rm);
 
 bool http_get(const std::string &url, std::string &out, std::string &err,
               const std::atomic<bool> *cancel = nullptr);
+// JSON POST used by the optional short-code lookup service.
+bool http_post_json(const std::string &url, const std::string &body,
+                    std::string &out, std::string &err,
+                    const std::atomic<bool> *cancel = nullptr);
 std::vector<Room> parse_lobby(const std::string &json);
 
 // RetroArch LAN discovery: 4-byte query to UDP 55435, host answers with a

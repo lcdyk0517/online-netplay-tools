@@ -236,3 +236,49 @@ bool http_get(const std::string &url, std::string &out, std::string &err,
     if (code != 200) { err = "HTTP " + std::to_string(code); return false; }
     return true;
 }
+
+bool http_post_json(const std::string &url, const std::string &body,
+                    std::string &out, std::string &err,
+                    const std::atomic<bool> *cancel) {
+    CURL *c = curl_easy_init();
+    if (!c) { err = "curl init"; return false; }
+    struct curl_slist *hdrs = nullptr;
+    hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
+    curl_easy_setopt(c, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(c, CURLOPT_POST, 1L);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, body.c_str());
+    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)body.size());
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, curl_write);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &out);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(c, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+    curl_easy_setopt(c, CURLOPT_USERAGENT, "dArkOS-ra-lobby/1.0");
+    curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+    if (!proxy.empty()) {
+        curl_easy_setopt(c, CURLOPT_PROXY, proxy.c_str());
+    } else {
+        for (const char *n : { "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy" }) {
+            const char *v = getenv(n);
+            if (v && *v) { curl_easy_setopt(c, CURLOPT_PROXY, v); break; }
+        }
+    }
+    curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+    if (cancel) {
+        curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, curl_cancelled);
+        curl_easy_setopt(c, CURLOPT_XFERINFODATA, (void *)cancel);
+    }
+    CURLcode rc = curl_easy_perform(c);
+    if (rc == CURLE_ABORTED_BY_CALLBACK) err = "cancelled";
+    else if (rc != CURLE_OK) err = curl_easy_strerror(rc);
+    long code = 0;
+    curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(c);
+    if (rc != CURLE_OK) return false;
+    if (code != 200) { err = "HTTP " + std::to_string(code); return false; }
+    return true;
+}

@@ -65,7 +65,17 @@ bool zt_tun_ensure(void) {
     int rc = 0;
     run_capture("timeout 5 sudo -n /sbin/modprobe tun 2>&1", &rc);
     if (!zt_tun_ok()) run_capture("timeout 5 sudo -n /usr/sbin/modprobe tun 2>&1", &rc);
+    /* udev creates the device node a moment after the module loads. */
+    for (int i = 0; i < 20 && !zt_tun_ok(); i++)
+        usleep(50000);
     return zt_tun_ok();
+}
+
+void zt_restart_daemon(void) {
+    /* A daemon that started without /dev/net/tun can never create zt
+     * interfaces; stopping it lets the next ensure_daemon() start clean. */
+    run_capture("timeout 5 sudo -n pkill -x zerotier-one 2>&1");
+    usleep(600000);
 }
 
 bool zt_ensure_daemon(void) {

@@ -136,7 +136,7 @@ void App::host_change() {
     }
     case 3:
         if (host.lan_only) { show_toast(L("仅局域网模式下固定直连", "LAN-only forces direct")); break; }
-        open_settings(); set.sel = 1;
+        open_choice(3);
         break;
     case 4:
         if (host.lan_only) { show_toast(L("仅局域网模式不公开", "LAN-only is not announced")); break; }

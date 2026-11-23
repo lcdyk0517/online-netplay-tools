@@ -33,6 +33,7 @@ int run_app(App &app) {
     auto check_exit_combo = [&]() { if (sel_held && start_held) run = false; };
 
     auto back = [&]() {
+        if (app.screen == 6) { app.screen = app.choice.ret; return; }
         if (app.screen == 5) { app.screen = 1; return; }
         if (app.screen == 4) app.screen = 3;
         else if (app.screen == 3) app.screen = 0;
@@ -46,6 +47,7 @@ int run_app(App &app) {
         else if (app.screen == 3) app.host_move(d);
         else if (app.screen == 4) app.picker_move(d);
         else if (app.screen == 5) app.member_move(d);
+        else if (app.screen == 6) app.choice_move(d);
         else nav(d);
     };
     auto horiz = [&](int d) { if (app.screen == 2) app.editor_move(d, 0); };
@@ -55,6 +57,7 @@ int run_app(App &app) {
         else if (app.screen == 3) app.host_change();
         else if (app.screen == 4) app.picker_choose();
         else if (app.screen == 5) app.member_toggle();
+        else if (app.screen == 6) app.choice_choose();
         else act(0);
     };
     auto start_btn = [&]() {
@@ -64,6 +67,7 @@ int run_app(App &app) {
         else if (app.screen == 3) app.host_launch();
         else if (app.screen == 4) app.picker_choose();
         else if (app.screen == 5) app.member_clear();
+        else if (app.screen == 6) app.choice_choose();
     };
     auto host_open = [&]() { if (app.screen == 0) { app.screen = 3; app.host.row = 0; } };
     auto x_btn = [&]() {

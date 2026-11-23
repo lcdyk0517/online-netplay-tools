@@ -20,6 +20,7 @@ struct App {
     bool zt_refresh_pending = false;
     bool lan_scan_pending = false;
     bool lobby_refresh_pending = false;
+    bool short_pub_pending = false;
 
     ~App();
     void close_fonts();
@@ -76,6 +77,12 @@ struct App {
         int row = 0, col = 0;
     } set;
 
+    // Generic list popup for the RetroArch relay location.
+    struct ChoiceUi {
+        int ret = 1;      // screen to return to
+        int sel = 0, scroll = 0;
+    } choice;
+
     void text(TTF_Font *f, const std::string &s, int x, int y, SDL_Color c, int maxw = 0);
     void fill(SDL_Rect rc, SDL_Color c);
     void round(SDL_Rect rc, int rad, SDL_Color c);
@@ -95,12 +102,18 @@ struct App {
     std::string zt_state_text() const;
     void zt_join_current(bool leave_if_joined);
     void zt_action();
+    // 6-char lookup code -> 16-hex network id, then join.
+    void zt_join_by_code(const std::string &code);
+    void short_publish_own(bool silent = false);
 
     // settings / on-screen keyboard
     void open_settings();
     int relay_idx() const;
     void set_relay_idx(int i);
     std::string relay_label(int i) const;
+    void open_choice(int ret_screen);
+    void choice_move(int d);
+    void choice_choose();
     std::vector<int> settings_rows() const;
     void settings_move(int d);
     void open_editor(int target);
@@ -138,4 +151,5 @@ struct App {
     void draw_members();
     void draw_host();
     void draw_picker();
+    void draw_choice();
 };

@@ -149,6 +149,13 @@ int main(int argc, char **argv) {
         app.apply_filter();
     }
     if (const char *sc = getenv("RA_LOBBY_SHOT_SCREEN")) {
+        if (getenv("RA_LOBBY_ZT")) {
+            zt_net = "0c6e45f0ae1cdd3e";
+            zt_host = getenv("RA_LOBBY_ZTHOST") != nullptr;
+            if (zt_host) zt_own = zt_net;
+            if (const char *s = getenv("RA_LOBBY_SHORTURL")) short_url = s;
+            if (const char *c = getenv("RA_LOBBY_ZTSHORT")) zt_short = c;
+        }
         app.screen = atoi(sc);
         if (app.screen == 1) { app.open_settings(); app.set.sel = 1; }
         if (app.screen == 2) {
@@ -156,6 +163,9 @@ int main(int argc, char **argv) {
             app.open_editor(et);
             if (et == 2) app.set.buf = "15228b9233";
         }
+        if (app.screen == 5) app.zt.members = { { "15228b9233", "10.210.41.129", true },
+                                                { "abcdef0123", "", false } };
+        if (app.screen == 6) app.open_choice(1);
         if (app.screen == 3 || app.screen == 4) {
             if (app.host.systems.empty()) {
                 EsSystem sy;
@@ -181,6 +191,9 @@ int main(int argc, char **argv) {
         if (getenv("RA_LOBBY_ZT")) {
             zt_net = "0c6e45f0ae1cdd3e";
             zt_host = getenv("RA_LOBBY_ZTHOST") != nullptr;
+            if (zt_host) zt_own = zt_net;
+            if (const char *s = getenv("RA_LOBBY_SHORTURL")) short_url = s;
+            if (const char *c = getenv("RA_LOBBY_ZTSHORT")) zt_short = c;
             app.zt.st.state = "ok";
             app.zt.st.node = "0c6e45f0ae";
             app.zt.st.ip = "10.147.17.5";

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <ctime>
 #include <string>
 
 #include "config.h"
@@ -14,6 +15,13 @@ void App::open_settings() {
     set.sel = 0;
     zt.st = ZtStatus();
     zt.members.clear();
+    /* Entering settings on the host is the natural point to make sure a code
+     * exists; republishing an unexpired network just extends the same code.
+     * Start it before the ZeroTier refresh so it is not queued behind it. */
+    const long long now = (long long)time(nullptr);
+    if (zt_host && zt_valid_id(zt_own) && !short_url.empty() &&
+        (zt_short.empty() || zt_short_exp <= 0 || now + 60 >= zt_short_exp))
+        short_publish_own(true);
     refresh_zt_async();
 }
 
@@ -42,11 +50,38 @@ std::string App::relay_label(int i) const {
     }
 }
 
+void App::open_choice(int ret_screen) {
+    choice.ret = ret_screen;
+    choice.sel = relay_idx();
+    choice.scroll = 0;
+    screen = 6;
+}
+
+void App::choice_move(int d) {
+    const int n = 6;
+    choice.sel = std::max(0, std::min(n - 1, choice.sel + d));
+    int vis = std::max(3, (SH - 220) / 44);
+    if (choice.sel < choice.scroll) choice.scroll = choice.sel;
+    if (choice.sel >= choice.scroll + vis) choice.scroll = choice.sel - vis + 1;
+}
+
+void App::choice_choose() {
+    set_relay_idx(choice.sel);
+    if (choice.sel == 5) {
+        /* Custom relay is a free-form address; go straight to the editor. */
+        open_editor(1);
+        return;
+    }
+    screen = choice.ret;
+}
+
 std::vector<int> App::settings_rows() const {
     std::vector<int> v{ 0, 1 };
     if (relay_idx() == 5) v.push_back(2);
     v.push_back(3);
     v.push_back(4);
+    v.push_back(10);  /* short-code service URL */
+    if (zt_host && zt_valid_id(zt_own) && !short_url.empty()) v.push_back(11);
     v.push_back(5);
     v.push_back(6);
     v.push_back(9);   /* join a network, right below members/create */
@@ -65,14 +100,19 @@ void App::settings_move(int d) {
 
 void App::open_editor(int target) {
     set.target = target;
-    set.buf = target == 0 ? nick : (target == 1 ? custom_mitm : (target == 2 ? zt_net : (target == 3 ? join_pass : host.pass)));
+    set.buf = target == 0 ? nick
+            : target == 1 ? custom_mitm
+            : target == 2 ? zt_net
+            : target == 3 ? join_pass
+            : target == 4 ? host.pass
+                          : short_url;
     set.row = 0; set.col = 0; screen = 2;
 }
 
 void App::settings_change() {
     switch (set.sel) {
     case 0: open_editor(0); break;
-    case 1: set_relay_idx((relay_idx() + 1) % 6); break;
+    case 1: open_choice(1); break;
     case 2: open_editor(1); break;
     case 3: announce = !announce; break;
     case 4:
@@ -114,6 +154,12 @@ void App::settings_change() {
         open_editor(2);
         set.buf.clear();
         break;
+    case 10:
+        open_editor(5);
+        break;
+    case 11:
+        short_publish_own();
+        break;
     }
 }
 
@@ -137,8 +183,15 @@ void App::editor_finish() {
         std::string id;
         for (char c : set.buf)
             if (isxdigit((unsigned char)c)) id += (char)tolower((unsigned char)c);
+        if (id.size() >= 3 && id.size() <= 6) {
+            /* Short lookup code: resolve to the 16-hex id, then join. */
+            set.buf = id;
+            screen = 1;
+            zt_join_by_code(id);
+            return;
+        }
         if (id.size() != 16) {
-            show_toast(L("网络 ID 需 16 位十六进制", "Network ID must be 16 hex digits"));
+            show_toast(L("网络 ID 16 位或短码 3-6 位", "Need a 16-hex ID or a 3-6 char code"));
             return;
         }
         set.buf = id;
@@ -147,6 +200,12 @@ void App::editor_finish() {
             zt.join_after_edit = false;
             zt_join_current(false);
         }
+    }
+    else if (set.target == 5) {
+        std::string u = trim_str(set.buf);
+        while (!u.empty() && u.back() == '/') u.pop_back();
+        short_url = u;
+        save_cfg();
     }
     else if (set.target == 3) {
         join_pass = set.buf;
@@ -158,7 +217,7 @@ void App::editor_finish() {
         }
         return;
     }
-    else {
+    else if (set.target == 4) {
         host.pass = set.buf;
         host.pass_on = !host.pass.empty();
         screen = 3;
@@ -190,7 +249,10 @@ void App::editor_activate() {
         return;
     }
     if (set.row < 5) {
-        size_t maxlen = set.target == 0 ? 24 : (set.target == 1 ? 64 : (set.target == 2 ? 16 : 64));
+        size_t maxlen = set.target == 0 ? 24
+                       : set.target == 2 ? 16
+                       : set.target == 5 ? 96
+                                         : 64;
         if (set.buf.size() < maxlen) set.buf += OSK_ROWS[set.row][set.col];
         return;
     }

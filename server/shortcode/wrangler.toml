@@ -1,0 +1,18 @@
+name = "ra-shortcode"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Create once:  wrangler d1 create ra-shortcode
+# then paste the returned id here and run:  wrangler d1 execute ra-shortcode --file=schema.sql --remote
+[[d1_databases]]
+binding = "DB"
+database_name = "ra-shortcode"
+database_id = "REPLACE_WITH_D1_ID"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+# Prefer a custom domain: workers.dev is unreachable from mainland networks.
+# [[routes]]
+# pattern = "code.example.com/*"
+# zone_name = "example.com"
