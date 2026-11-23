@@ -59,13 +59,13 @@ int run_app(App &app) {
     };
     auto start_btn = [&]() {
         if (app.screen == 0) app.open_settings();
-        else if (app.screen == 1) { app.ssel = 4; app.settings_change(); }
+        else if (app.screen == 1) { app.set.sel = 4; app.settings_change(); }
         else if (app.screen == 2) app.editor_finish();
         else if (app.screen == 3) app.host_launch();
         else if (app.screen == 4) app.picker_choose();
         else if (app.screen == 5) app.member_clear();
     };
-    auto host_open = [&]() { if (app.screen == 0) { app.screen = 3; app.hsel = 0; } };
+    auto host_open = [&]() { if (app.screen == 0) { app.screen = 3; app.host.row = 0; } };
     auto x_btn = [&]() {
         if (app.screen == 2) app.editor_cancel();      // discard edit
         else if (app.screen == 5) app.member_delete();
@@ -77,7 +77,7 @@ int run_app(App &app) {
         else if (app.screen == 0) act(3);
     };
     auto b_btn = [&]() {  // B: exits the list, deletes a char in the editor
-        if (app.screen == 2) { if (!app.edit_buf.empty()) app.edit_buf.pop_back(); }
+        if (app.screen == 2) { if (!app.set.buf.empty()) app.set.buf.pop_back(); }
         else back();
     };
     auto page_btn = [&](int d) { if (app.screen == 0) app.set_page(app.filter + d); };
@@ -102,9 +102,11 @@ int run_app(App &app) {
     };
 
     while (run) {
+        app.poll_async();
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) { run = false; break; }
+            if (app.async.busy()) continue;  /* a background job owns the state */
             if (e.type == SDL_KEYDOWN) {
                 SDL_Keycode k = e.key.keysym.sym;
                 if (k == SDLK_ESCAPE) back();
@@ -113,7 +115,7 @@ int run_app(App &app) {
                 else if (k == SDLK_UP) vert(-1);
                 else if (k == SDLK_RIGHT) horiz(1);
                 else if (k == SDLK_LEFT) horiz(-1);
-                else if (k == SDLK_BACKSPACE) { if (app.screen == 2 && !app.edit_buf.empty()) app.edit_buf.pop_back(); }
+                else if (k == SDLK_BACKSPACE) { if (app.screen == 2 && !app.set.buf.empty()) app.set.buf.pop_back(); }
                 else if (k == SDLK_RETURN || k == SDLK_SPACE) confirm();
                 else if (app.screen == 0) {
                     if (k == SDLK_x) host_open();
@@ -154,6 +156,5 @@ int run_app(App &app) {
         SDL_Delay(16);
     }
     if (pad) SDL_GameControllerClose(pad);
-    SDL_Quit();
     return 0;
 }

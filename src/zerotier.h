@@ -19,7 +19,7 @@ bool zt_tun_ok();
 bool zt_daemon_up();
 bool zt_tun_ensure();
 bool zt_ensure_daemon();
-std::string zt_cli(const std::string &args);
+std::string zt_cli(const std::string &verb, const std::string &id);
 bool zt_valid_id(const std::string &id);
 ZtStatus zt_status(const std::string &netid);
 

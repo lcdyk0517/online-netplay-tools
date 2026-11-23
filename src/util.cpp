@@ -34,3 +34,13 @@ size_t curl_write(char *p, size_t sz, size_t n, void *ud) {
     ((std::string *)ud)->append(p, sz * n);
     return sz * n;
 }
+
+std::string shq(const std::string &s) {
+    std::string o = "'";
+    for (char c : s) {
+        if (c == '\'') o += "'\\''";
+        else o += c;
+    }
+    o += "'";
+    return o;
+}

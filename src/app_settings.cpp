@@ -11,10 +11,10 @@
 
 void App::open_settings() {
     screen = 1;
-    ssel = 0;
-    zt_adopt_own();
-    zt_st = zt_status(zt_net);   // fast when the daemon is not running
-    zt_refresh_members();
+    set.sel = 0;
+    zt.st = ZtStatus();
+    zt.members.clear();
+    refresh_zt_async();
 }
 
 int App::relay_idx() const {
@@ -58,19 +58,19 @@ std::vector<int> App::settings_rows() const {
 void App::settings_move(int d) {
     std::vector<int> rs = settings_rows();
     int i = 0;
-    for (; i < (int)rs.size(); i++) if (rs[i] == ssel) break;
+    for (; i < (int)rs.size(); i++) if (rs[i] == set.sel) break;
     i = std::max(0, std::min((int)rs.size() - 1, i + d));
-    ssel = rs[i];
+    set.sel = rs[i];
 }
 
 void App::open_editor(int target) {
-    edit_target = target;
-    edit_buf = target == 0 ? nick : (target == 1 ? custom_mitm : (target == 2 ? zt_net : (target == 3 ? join_pass : host_pass)));
-    erow = 0; ecol = 0; screen = 2;
+    set.target = target;
+    set.buf = target == 0 ? nick : (target == 1 ? custom_mitm : (target == 2 ? zt_net : (target == 3 ? join_pass : host.pass)));
+    set.row = 0; set.col = 0; screen = 2;
 }
 
 void App::settings_change() {
-    switch (ssel) {
+    switch (set.sel) {
     case 0: open_editor(0); break;
     case 1: set_relay_idx((relay_idx() + 1) % 6); break;
     case 2: open_editor(1); break;
@@ -80,10 +80,15 @@ void App::settings_change() {
         else open_editor(2);
         break;
     case 5:
+        if (zt_host && zt_net == zt_own) {
+            refresh_zt_async();
+            show_toast(L("本机网络已连接", "Hosted network is up"));
+            break;
+        }
         if (!zt_valid_id(zt_net)) {
-            join_after_edit = true;
+            zt.join_after_edit = true;
             open_editor(2);
-            edit_buf.clear();
+            set.buf.clear();
         } else {
             zt_action();
         }
@@ -93,44 +98,44 @@ void App::settings_change() {
         else zt_create_own();
         break;
     case 7:
-        zt_st = zt_status(zt_net);
-        zt_refresh_members();
+        refresh_zt_async();
         show_toast(L("ZeroTier 状态已刷新", "ZeroTier status refreshed"));
         break;
-    case 8:
+    case 8: {
         if (nick.empty()) nick = "darkos3562";
-        save_cfg();
+        bool ok = save_cfg();
         save_ra_all();
         screen = 0;
-        show_toast(L("已保存", "Saved"));
+        show_toast(ok ? L("已保存", "Saved") : L("保存失败", "Save failed"));
         break;
+    }
     case 9:
-        join_after_edit = true;
+        zt.join_after_edit = true;
         open_editor(2);
-        edit_buf.clear();
+        set.buf.clear();
         break;
     }
 }
 
 void App::editor_move(int dx, int dy) {
-    int len = erow < 5 ? 13 : 6;
-    ecol = (ecol + dx + len) % len;
-    erow = (erow + dy + 6) % 6;
-    ecol = std::min(ecol, erow < 5 ? 12 : 5);
+    int len = set.row < 5 ? 13 : 6;
+    set.col = (set.col + dx + len) % len;
+    set.row = (set.row + dy + 6) % 6;
+    set.col = std::min(set.col, set.row < 5 ? 12 : 5);
 }
 
 void App::editor_finish() {
-    if (edit_target == 0) { if (!edit_buf.empty()) nick = edit_buf; }
-    else if (edit_target == 1) custom_mitm = edit_buf;
-    else if (edit_target == 2) {
-        zt_net = lower(edit_buf);
-        if (join_after_edit) {
-            join_after_edit = false;
+    if (set.target == 0) { if (!set.buf.empty()) nick = set.buf; }
+    else if (set.target == 1) custom_mitm = set.buf;
+    else if (set.target == 2) {
+        zt_net = lower(set.buf);
+        if (zt.join_after_edit) {
+            zt.join_after_edit = false;
             zt_join_current(false);
         }
     }
-    else if (edit_target == 3) {
-        join_pass = edit_buf;
+    else if (set.target == 3) {
+        join_pass = set.buf;
         screen = 0;
         if (has_pending) {
             Room rm = pending_room;
@@ -140,8 +145,8 @@ void App::editor_finish() {
         return;
     }
     else {
-        host_pass = edit_buf;
-        host_pass_on = !host_pass.empty();
+        host.pass = set.buf;
+        host.pass_on = !host.pass.empty();
         screen = 3;
         return;
     }
@@ -149,23 +154,23 @@ void App::editor_finish() {
 }
 
 void App::editor_cancel() {
-    join_after_edit = false;
-    if (edit_target == 3) { has_pending = false; join_pass.clear(); screen = 0; }
-    else if (edit_target == 4) screen = 3;
+    zt.join_after_edit = false;
+    if (set.target == 3) { has_pending = false; join_pass.clear(); screen = 0; }
+    else if (set.target == 4) screen = 3;
     else screen = 1;
 }
 
 void App::editor_activate() {
-    if (erow < 5) {
-        size_t maxlen = edit_target == 0 ? 24 : (edit_target == 1 ? 64 : (edit_target == 2 ? 16 : 64));
-        if (edit_buf.size() < maxlen) edit_buf += OSK_ROWS[erow][ecol];
+    if (set.row < 5) {
+        size_t maxlen = set.target == 0 ? 24 : (set.target == 1 ? 64 : (set.target == 2 ? 16 : 64));
+        if (set.buf.size() < maxlen) set.buf += OSK_ROWS[set.row][set.col];
         return;
     }
-    switch (ecol) {
-    case 0: if (edit_buf.size() < 64) edit_buf += '|'; break;
-    case 1: if (edit_buf.size() < 64) edit_buf += ' '; break;
-    case 2: if (!edit_buf.empty()) edit_buf.pop_back(); break;
-    case 3: edit_buf.clear(); break;
+    switch (set.col) {
+    case 0: if (set.buf.size() < 64) set.buf += '|'; break;
+    case 1: if (set.buf.size() < 64) set.buf += ' '; break;
+    case 2: if (!set.buf.empty()) set.buf.pop_back(); break;
+    case 3: set.buf.clear(); break;
     case 4: editor_finish(); break;
     case 5: editor_cancel(); break;
     }

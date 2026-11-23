@@ -11,12 +11,12 @@ SYSROOT := $(SDK)/aarch64-linux-gnu/libc
 
 ifdef MODERN
 CXX      := /home/lcdyk/sdl2_xbuild/bin/ac-g++
-CXXFLAGS := -O2 -std=c++17 -pthread -Isrc -I/home/lcdyk/dolphin-sysroot/usr/include
+CXXFLAGS := -O2 -std=c++17 -pthread -MMD -MP -Isrc -I/home/lcdyk/dolphin-sysroot/usr/include
 LDFLAGS  := -pthread
 LDLIBS   := -Ldeps -lSDL2_ttf-2.0 -lSDL2 -lcurl -lz
 else
 CXX      := $(SDK)/bin/aarch64-linux-gnu-g++
-CXXFLAGS := -O2 -std=c++17 -pthread -Isrc \
+CXXFLAGS := -O2 -std=c++17 -pthread -MMD -MP -Isrc \
             --sysroot=$(SYSROOT) -I$(SYSROOT)/usr/include -I$(SYSROOT)/usr/include/SDL2
 LDFLAGS  := -pthread --sysroot=$(SYSROOT)
 LDLIBS   := -L$(SYSROOT)/usr/lib/aarch64-linux-gnu -L$(SYSROOT)/lib/aarch64-linux-gnu \
@@ -32,6 +32,7 @@ endif
 SRCS := $(wildcard src/*.cpp)
 BUILD := build$(if $(SHOT),-shot,)
 OBJS := $(patsubst src/%.cpp,$(BUILD)/%.o,$(SRCS))
+DEPS := $(OBJS:.o=.d)
 
 all: $(BIN)
 
@@ -41,6 +42,8 @@ $(BIN): $(OBJS)
 $(BUILD)/%.o: src/%.cpp src/*.h
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+-include $(DEPS)
 
 clean:
 	rm -rf build build-shot netplay netplay-shot

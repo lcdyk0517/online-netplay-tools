@@ -68,20 +68,49 @@ LocalGame find_game(const std::string &name, const std::string &crc,
     LocalGame g;
     if (!crc.empty()) {
         auto it = crcs.find(lower(crc));
-        if (it != crcs.end()) { g.found = true; g.by_crc = true; g.path = it->second; return g; }
+        if (it != crcs.end() && access(it->second.c_str(), R_OK) == 0) {
+            g.found = true; g.by_crc = true; g.path = it->second;
+            return g;
+        }
     }
     std::string n = norm(name);
     auto it = names.find(n);
     if (it == names.end()) it = names.find(norm(base_stem(name)));
     if (it != names.end()) { g.found = true; g.path = it->second; return g; }
-    // loose contains match (translations/scene tags)
+    /* Loose match for translations/scene tags. Prefix matches are trusted;
+     * substring matches must be close in length so that e.g.
+     * "supermariobrospc10" does not pick "mariobros". */
     if (n.size() >= 4) {
+        int best_score = 99;
+        size_t best_delta = (size_t)-1;
+        std::string best_path, tie_path;
+        bool ambiguous = false;
         for (auto &kv : names) {
-            if (kv.first.size() < 4) continue;
-            if (kv.first.find(n) != std::string::npos || n.find(kv.first) != std::string::npos) {
-                g.found = true; g.path = kv.second; return g;
+            const std::string &k = kv.first;
+            if (k.size() < 4) continue;
+            int score = 99;
+            if (k.rfind(n, 0) == 0 || n.rfind(k, 0) == 0) score = 1;
+            else if (k.find(n) != std::string::npos || n.find(k) != std::string::npos) {
+                size_t big = std::max(k.size(), n.size());
+                size_t small = std::min(k.size(), n.size());
+                if (big - small <= std::max<size_t>(4, n.size() / 4)) score = 2;
+            }
+            if (score >= 99) continue;
+            size_t delta = k.size() > n.size() ? k.size() - n.size() : n.size() - k.size();
+            if (score < best_score || (score == best_score && delta < best_delta)) {
+                best_score = score;
+                best_delta = delta;
+                best_path = kv.second;
+                ambiguous = false;
+            } else if (score == best_score && delta == best_delta &&
+                       !best_path.empty() && kv.second != best_path) {
+                /* Same rank, different file: refuse to guess. */
+                ambiguous = true;
+                tie_path = kv.second;
             }
         }
+        (void)tie_path;
+        if (!best_path.empty() && !ambiguous) { g.found = true; g.path = best_path; }
     }
     return g;
 }
@@ -211,8 +240,9 @@ static bool ext_ok(const std::string &file, const std::string &exts) {
 }
 
 static void list_files_rec(const std::string &dir, std::vector<std::string> &out, int depth) {
+    if (depth > 2) return;
     DIR *d = opendir(dir.c_str());
-    if (!d || depth > 2) return;
+    if (!d) return;
     struct dirent *e;
     while ((e = readdir(d))) {
         std::string n = e->d_name;
@@ -254,8 +284,9 @@ void scan_es_games(std::map<std::string, std::string> &names) {
 
 
 bool dir_has_game(const std::string &dir, const std::string &exts, int depth) {
+    if (depth > 2) return false;
     DIR *d = opendir(dir.c_str());
-    if (!d || depth > 2) return false;
+    if (!d) return false;
     bool found = false;
     struct dirent *e;
     while (!found && (e = readdir(d))) {
@@ -273,8 +304,9 @@ bool dir_has_game(const std::string &dir, const std::string &exts, int depth) {
 
 void scan_games_dir(const std::string &dir, const std::string &exts, int depth,
                     std::vector<GameEntry> &out) {
+    if (depth > 2) return;
     DIR *d = opendir(dir.c_str());
-    if (!d || depth > 2) return;
+    if (!d) return;
     struct dirent *e;
     while ((e = readdir(d))) {
         std::string n = e->d_name;

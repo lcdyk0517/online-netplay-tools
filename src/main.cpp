@@ -118,7 +118,18 @@ int main(int argc, char **argv) {
     App app; app.r = r;
     app.f28 = TTF_OpenFont(font, 28); app.f22 = TTF_OpenFont(font, 22);
     app.f18 = TTF_OpenFont(font, 18); app.f16 = TTF_OpenFont(font, 16);
-    if (!app.f28 || !app.f22 || !app.f18 || !app.f16) return 1;
+    auto cleanup = [&]() {
+        app.async.cancel();
+        app.async.join();
+        app.close_fonts();
+        if (r) SDL_DestroyRenderer(r);
+        if (w) SDL_DestroyWindow(w);
+        if (shot_surf) SDL_FreeSurface(shot_surf);
+        TTF_Quit();
+        curl_global_cleanup();
+        SDL_Quit();
+    };
+    if (!app.f28 || !app.f22 || !app.f18 || !app.f16) { cleanup(); return 1; }
     load_language();
     load_cfg();
 #ifdef RA_SHOT
@@ -138,49 +149,56 @@ int main(int argc, char **argv) {
     }
     if (const char *sc = getenv("RA_LOBBY_SHOT_SCREEN")) {
         app.screen = atoi(sc);
-        if (app.screen == 1) app.ssel = 1;
+        if (app.screen == 1) { app.open_settings(); app.set.sel = 1; }
         if (app.screen == 2) app.open_editor(0);
         if (app.screen == 3 || app.screen == 4) {
-            if (app.systems.empty()) {
+            if (app.host.systems.empty()) {
                 EsSystem sy;
                 sy.name = "snes"; sy.fullname = "Super NES"; sy.path = "/roms/snes/";
                 sy.hostable = { "snes9x", "snes9x2005" };
-                app.systems.push_back(sy);
+                app.host.systems.push_back(sy);
                 sy.name = "gba"; sy.fullname = "Game Boy Advance"; sy.path = "/roms/gba/";
                 sy.hostable = { "armgba", "mgba" };
-                app.systems.push_back(sy);
+                app.host.systems.push_back(sy);
             }
-            if (app.hsys < 0) app.select_system(0);
-            if (getenv("RA_LOBBY_LANONLY")) app.lan_only = true;
+            if (app.host.sys < 0) app.select_system(0);
+            if (getenv("RA_LOBBY_LANONLY")) app.host.lan_only = true;
             if (app.screen == 4) {
-                app.pick_kind = getenv("RA_LOBBY_SHOT_PICK") ? atoi(getenv("RA_LOBBY_SHOT_PICK")) : 0;
-                if (app.pick_kind == 1 && app.sys_games.empty())
+                app.host.pick_kind = getenv("RA_LOBBY_SHOT_PICK") ? atoi(getenv("RA_LOBBY_SHOT_PICK")) : 0;
+                if (app.host.pick_kind == 1 && app.host.games.empty())
                     for (int i = 0; i < 12; i++)
-                        app.sys_games.push_back({ "Sample Game " + std::to_string(i + 1),
+                        app.host.games.push_back({ "Sample Game " + std::to_string(i + 1),
                                                   "/roms/snes/sample" + std::to_string(i) + ".sfc" });
-                if (app.pick_kind == 2 && app.sys_cores.empty())
-                    app.sys_cores = { "snes9x", "snes9x2005", "chimerasnes" };
+                if (app.host.pick_kind == 2 && app.host.cores.empty())
+                    app.host.cores = { "snes9x", "snes9x2005", "chimerasnes" };
             }
         }
         if (getenv("RA_LOBBY_ZT")) {
-            app.zt_net = "0c6e45f0ae1cdd3e";
-            app.zt_host = getenv("RA_LOBBY_ZTHOST") != nullptr;
-            app.zt_st.state = "ok";
-            app.zt_st.node = "0c6e45f0ae";
-            app.zt_st.ip = "10.147.17.5";
-            if (app.zt_host) {
-                app.zt_members_list.clear();
-                app.zt_members_list.push_back({ "1234567890", "10.147.17.99", true });
-                app.zt_members_list.push_back({ "abcdef0123", "", false });
+            zt_net = "0c6e45f0ae1cdd3e";
+            zt_host = getenv("RA_LOBBY_ZTHOST") != nullptr;
+            app.zt.st.state = "ok";
+            app.zt.st.node = "0c6e45f0ae";
+            app.zt.st.ip = "10.147.17.5";
+            if (zt_host) {
+                app.zt.members.clear();
+                app.zt.members.push_back({ "1234567890", "10.147.17.99", true });
+                app.zt.members.push_back({ "abcdef0123", "", false });
             }
         }
         app.draw();
     }
     if (const char *shot = getenv("RA_LOBBY_SHOT")) {
+        for (int i = 0; i < 400 && (app.async.busy() || app.zt_refresh_pending); i++) {
+            app.poll_async();
+            SDL_Delay(50);
+        }
         app.draw();
         if (shot_surf) SDL_SaveBMP(shot_surf, shot);
+        cleanup();
         return 0;
     }
 #endif
-    return run_app(app);
+    int rc = run_app(app);
+    cleanup();
+    return rc;
 }

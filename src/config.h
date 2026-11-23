@@ -23,6 +23,6 @@ bool cfg_get(const char *path, const std::string &key, std::string &out);
 void cfg_set(const char *path, const std::string &key, const std::string &value);
 
 void load_cfg();
-void save_cfg();
+bool save_cfg();
 void load_ra_all();
 void save_ra_all();

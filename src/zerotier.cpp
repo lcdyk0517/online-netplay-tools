@@ -9,17 +9,26 @@
 #include <string>
 #include <unistd.h>
 #include <vector>
+#include <sys/wait.h>
 #include <curl/curl.h>
 
+#include "json.h"
 #include "util.h"
 
-static std::string run_capture(const std::string &cmd) {
+static std::string run_capture(const std::string &cmd, int *exit_status = nullptr) {
     std::string out;
+    if (exit_status) *exit_status = -1;
     FILE *p = popen(cmd.c_str(), "r");
     if (!p) return out;
     char buf[512];
     while (fgets(buf, sizeof(buf), p)) out += buf;
-    pclose(p);
+    int rc = pclose(p);
+    if (exit_status) {
+        if (rc == -1) *exit_status = -1;
+        else if (WIFEXITED(rc)) *exit_status = WEXITSTATUS(rc);
+        else if (WIFSIGNALED(rc)) *exit_status = 128 + WTERMSIG(rc);
+        else *exit_status = rc;
+    }
     return trim_str(out);
 }
 
@@ -44,16 +53,18 @@ bool zt_daemon_up(void)  { return access(ZT_PORT, R_OK) == 0; }
 
 bool zt_api_ready(void) {
     if (!zt_daemon_up()) return false;
-    std::string out = run_capture("timeout 4 sudo -n " + zt_bin() + " -q info 2>&1");
-    return out.rfind("200 info", 0) == 0;
+    int rc = 0;
+    std::string out = run_capture("timeout 4 sudo -n " + shq(zt_bin()) + " -q info 2>&1", &rc);
+    return rc == 0 && out.rfind("200 info", 0) == 0;
 }
 
 /* ArkOS4Clone's sudo secure_path has no /sbin, so "modprobe" is not found
  * there; call it by absolute path. 3326 ships tun as a module. */
 bool zt_tun_ensure(void) {
     if (zt_tun_ok()) return true;
-    run_capture("timeout 5 sudo -n /sbin/modprobe tun 2>&1");
-    if (!zt_tun_ok()) run_capture("timeout 5 sudo -n /usr/sbin/modprobe tun 2>&1");
+    int rc = 0;
+    run_capture("timeout 5 sudo -n /sbin/modprobe tun 2>&1", &rc);
+    if (!zt_tun_ok()) run_capture("timeout 5 sudo -n /usr/sbin/modprobe tun 2>&1", &rc);
     return zt_tun_ok();
 }
 
@@ -66,10 +77,13 @@ bool zt_ensure_daemon(void) {
      * it survives a killed daemon, and skipping the start then leaves a dead
      * service behind. An extra start when one is already running exits fast. */
     {
-        std::string cmd = "timeout 8 sudo -n " + zt_bin()
+        std::string cmd = "timeout 8 sudo -n " + shq(zt_bin())
                         + " -U -d >/tmp/ra-lobby-zt.log 2>&1";
         int rc = std::system(cmd.c_str());
-        (void)rc;
+        int code = (rc != -1 && WIFEXITED(rc)) ? WEXITSTATUS(rc)
+                 : (rc != -1 && WIFSIGNALED(rc)) ? 128 + WTERMSIG(rc) : rc;
+        if (code != 0)
+            fprintf(stderr, "zerotier-one start exited %d\n", code);
     }
     for (int i = 0; i < 32; i++) {
         if (zt_api_ready()) return true;
@@ -78,9 +92,15 @@ bool zt_ensure_daemon(void) {
     return false;
 }
 
-std::string zt_cli(const std::string &args) {
+std::string zt_cli(const std::string &verb, const std::string &id) {
     if (!zt_ensure_daemon()) return "";
-    return run_capture("timeout 6 sudo -n " + zt_bin() + " -q " + args + " 2>&1");
+    int rc = 0;
+    std::string out = run_capture("timeout 6 sudo -n " + shq(zt_bin()) + " -q " +
+                                  shq(verb) + " " + shq(id) + " 2>&1", &rc);
+    if (out.rfind("200", 0) != 0)
+        fprintf(stderr, "zerotier %s %s failed (rc=%d): %s\n",
+                verb.c_str(), id.c_str(), rc, out.c_str());
+    return out;
 }
 
 bool zt_valid_id(const std::string &id) {
@@ -111,17 +131,20 @@ void zt_parse_networks(const std::string &nets, const std::string &netid, ZtStat
         if (tok.size() < 8 || tok[0] != "200" || tok[1] != "listnetworks") continue;
         if (!netid.empty() && lower(tok[2]) != lower(netid)) continue;
         st.found = true;
-        const std::string &s = tok[5];
-        if (s == "OK") { st.ok = true; st.state = "ok"; }
-        else if (s == "ACCESS_DENIED") st.state = "denied";
-        else if (s == "REQUESTING_CONFIGURATION") st.state = "requesting";
-        else if (s == "NOT_FOUND") st.state = "notfound";
-        else st.state = s;
-        for (size_t k = 7; k < tok.size(); k++) {
+        /* The network name may contain spaces, so do not index by column:
+         * take the status token by keyword and the IP from the tail. */
+        for (size_t k = 3; k < tok.size(); k++) {
+            const std::string &t = tok[k];
+            if (t == "OK") { st.ok = true; st.state = "ok"; break; }
+            if (t == "ACCESS_DENIED") { st.state = "denied"; break; }
+            if (t == "REQUESTING_CONFIGURATION") { st.state = "requesting"; break; }
+            if (t == "NOT_FOUND") { st.state = "notfound"; break; }
+        }
+        for (size_t k = tok.size(); k-- > 3;) {
             std::string a = tok[k];
             size_t slash = a.find('/');
             if (slash != std::string::npos) a = a.substr(0, slash);
-            if (a.find('.') != std::string::npos) { st.ip = a; break; }
+            if (a.find('.') != std::string::npos && a.find(':') == std::string::npos) { st.ip = a; break; }
         }
         break;
     }
@@ -133,8 +156,8 @@ ZtStatus zt_status(const std::string &netid) {
     if (!zt_installed()) { st.state = "noinst"; return st; }
     if (!zt_tun_ok())    { st.state = "notun"; return st; }
     if (!zt_daemon_up()) { st.state = "down"; return st; }
-    zt_parse_info(run_capture("timeout 6 sudo -n " + zt_bin() + " -q info 2>&1"), st);
-    zt_parse_networks(run_capture("timeout 6 sudo -n " + zt_bin() + " -q listnetworks 2>&1"), netid, st);
+    zt_parse_info(run_capture("timeout 6 sudo -n " + shq(zt_bin()) + " -q info 2>&1"), st);
+    zt_parse_networks(run_capture("timeout 6 sudo -n " + shq(zt_bin()) + " -q listnetworks 2>&1"), netid, st);
     return st;
 }
 
@@ -158,13 +181,15 @@ std::string zt_token(void) {
     if (!cached.empty()) return cached;
     std::string p = zt_home() + "/authtoken.secret";
     cached = zt_read_file(p);
-    if (cached.empty()) cached = run_capture("timeout 4 sudo -n cat " + p + " 2>/dev/null");
+    if (cached.empty()) cached = run_capture("timeout 4 sudo -n cat " + shq(p) + " 2>/dev/null");
     return cached;
 }
 
 std::string zt_port(void) {
-    std::string p = zt_read_file(zt_home() + "/zerotier-one.port");
-    return p.empty() ? std::string("9993") : p;
+    std::string p = trim_str(zt_read_file(zt_home() + "/zerotier-one.port"));
+    if (p.empty()) return "9993";
+    for (char c : p) if (!isdigit((unsigned char)c)) return "9993";
+    return p;
 }
 
 bool zt_api(const std::string &method, const std::string &path,
@@ -201,43 +226,35 @@ bool zt_api(const std::string &method, const std::string &path,
     return true;
 }
 
-std::string json_string_field(const std::string &j, const char *key) {
-    std::string k = std::string("\"") + key + "\":\"";
-    size_t p = j.find(k);
-    if (p == std::string::npos) return "";
-    p += k.size();
-    size_t e = j.find('"', p);
-    return e == std::string::npos ? "" : j.substr(p, e - p);
-}
-
 
 std::vector<ZtMember> zt_fetch_members(const std::string &nwid) {
     std::vector<ZtMember> out;
     std::string resp, err;
     if (!zt_api("GET", "/controller/network/" + nwid + "/member", "", resp, err)) return out;
-    /* ["id1","id2",...] */
-    size_t p = 0;
-    while ((p = resp.find('"', p)) != std::string::npos) {
-        size_t e = resp.find('"', p + 1);
-        if (e == std::string::npos) break;
-        std::string id = resp.substr(p + 1, e - p - 1);
-        p = e + 1;
-        if (id.size() != 10) continue;
+    JsonReader ids(resp);
+    if (!ids.eat('[')) return out;
+    std::vector<std::string> list;
+    while (true) {
+        ids.ws();
+        if (ids.i >= ids.s.size()) break;
+        if (ids.s[ids.i] == ']') break;
+        std::string id;
+        if (!ids.str(id)) break;
+        if (id.size() == 10) list.push_back(id);
+        ids.ws();
+        if (ids.i < ids.s.size() && ids.s[ids.i] == ',') { ids.i++; continue; }
+        break;
+    }
+    for (auto &id : list) {
         ZtMember m;
         m.id = id;
         std::string obj, e2;
         if (zt_api("GET", "/controller/network/" + nwid + "/member/" + id, "", obj, e2)) {
-            m.authorized = obj.find("\"authorized\":true") != std::string::npos;
-            size_t a = obj.find("\"ipAssignments\":[");
-            if (a != std::string::npos) {
-                a = obj.find('[', a);
-                a = (a == std::string::npos) ? std::string::npos : obj.find('"', a);
-                size_t b = (a == std::string::npos) ? std::string::npos : obj.find('"', a + 1);
-                if (b != std::string::npos) {
-                    std::string ip = obj.substr(a + 1, b - a - 1);
-                    if (ip.find('.') != std::string::npos) m.ip = ip;
-                }
-            }
+            std::string v;
+            if (json_object_field(obj, "authorized", v)) m.authorized = (v == "true");
+            if (json_string_array_first(obj, "ipAssignments", v) &&
+                v.find('.') != std::string::npos)
+                m.ip = v;
         }
         out.push_back(m);
     }
@@ -253,13 +270,18 @@ std::vector<std::string> zt_controller_networks(void) {
     std::vector<std::string> out;
     std::string resp, err;
     if (!zt_api("GET", "/controller/network", "", resp, err)) return out;
-    size_t p = 0;
-    while ((p = resp.find('"', p)) != std::string::npos) {
-        size_t e = resp.find('"', p + 1);
-        if (e == std::string::npos) break;
-        std::string id = resp.substr(p + 1, e - p - 1);
-        p = e + 1;
+    JsonReader r(resp);
+    if (!r.eat('[')) return out;
+    while (true) {
+        r.ws();
+        if (r.i >= r.s.size()) break;
+        if (r.s[r.i] == ']') break;
+        std::string id;
+        if (!r.str(id)) break;
         if (id.size() == 16) out.push_back(id);
+        r.ws();
+        if (r.i < r.s.size() && r.s[r.i] == ',') { r.i++; continue; }
+        break;
     }
     return out;
 }
@@ -274,13 +296,35 @@ bool zt_authorize_member(const std::string &nwid, const std::string &id, bool au
  * returns its 16-hex id (controller address + 8 hex). */
 std::string zt_create_network(const std::string &controller_id) {
     if (controller_id.size() != 10) return "";
-    /* Every controller would otherwise hand out 10.147.17.0/24, which turns
-     * into duplicate interface addresses when one device joins two of our
-     * networks. Derive a stable /24 from the controller address instead. */
+    /* Pick a /24 that no network of this controller uses yet. The starting
+     * point is derived from the controller address, but sequential creates
+     * must not land on the same subnet (two zt interfaces with one IP break
+     * routing). */
     unsigned x = (unsigned)strtoul(controller_id.substr(0, 2).c_str(), nullptr, 16);
     unsigned y = (unsigned)strtoul(controller_id.substr(2, 2).c_str(), nullptr, 16);
-    std::string base = "10." + std::to_string(128 + (x % 96))
-                            + "." + std::to_string(1 + (y % 254));
+    std::vector<std::string> used;
+    for (auto &nw : zt_controller_networks()) {
+        std::string obj, err;
+        if (!zt_api("GET", "/controller/network/" + nw, "", obj, err)) continue;
+        std::vector<std::string> routes;
+        json_object_array_items(obj, "routes", routes);
+        for (auto &route : routes) {
+            std::string t;
+            if (json_object_field(route, "target", t) && t.rfind("10.", 0) == 0)
+                used.push_back(t);
+        }
+    }
+    std::string base;
+    unsigned start = y % 254;
+    for (unsigned i = 0; i < 254 && base.empty(); i++) {
+        std::string cand = "10." + std::to_string(128 + (x % 96)) + "." +
+                           std::to_string(1 + ((start + i) % 254));
+        bool taken = false;
+        for (auto &t : used)
+            if (t.rfind(cand + ".", 0) == 0) { taken = true; break; }
+        if (!taken) base = cand;
+    }
+    if (base.empty()) return "";
     std::string body =
         "{\"name\":\"dArkOS Netplay\",\"private\":true,\"enableBroadcast\":true,"
         "\"v4AssignMode\":{\"zt\":true},"
@@ -289,7 +333,8 @@ std::string zt_create_network(const std::string &controller_id) {
     std::string resp, err;
     if (!zt_api("POST", "/controller/network/" + controller_id + "______", body, resp, err))
         return "";
-    std::string nwid = json_string_field(resp, "nwid");
-    if (nwid.empty()) nwid = json_string_field(resp, "id");
+    std::string nwid;
+    if (!json_object_field(resp, "nwid", nwid) || nwid.empty())
+        json_object_field(resp, "id", nwid);
     return nwid;
 }

@@ -51,7 +51,7 @@ static std::string fixed_str(const char *p, size_t n) {
 }
 
 // Returns hosts found within `wait_ms`; addresses are the responders' LAN IPs.
-void lan_discover(std::vector<Room> &out, int wait_ms) {
+void lan_discover(std::vector<Room> &out, int wait_ms, const std::atomic<bool> *cancel) {
     int fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (fd < 0) return;
     int on = 1;
@@ -81,6 +81,7 @@ void lan_discover(std::vector<Room> &out, int wait_ms) {
 
     Uint32 start = SDL_GetTicks();
     while ((int)(SDL_GetTicks() - start) < wait_ms) {
+        if (cancel && cancel->load()) break;
         fd_set rf;
         FD_ZERO(&rf);
         FD_SET(fd, &rf);
@@ -118,58 +119,7 @@ void lan_discover(std::vector<Room> &out, int wait_ms) {
     close(fd);
 }
 
-// ---------------- tiny JSON reader for the flat lobby list ----------------
-struct JsonReader {
-    const std::string &s;
-    size_t i = 0;
-    explicit JsonReader(const std::string &src) : s(src) {}
-    void ws() { while (i < s.size() && isspace((unsigned char)s[i])) i++; }
-    bool eat(char c) { ws(); if (i < s.size() && s[i] == c) { i++; return true; } return false; }
-    bool str(std::string &out) {
-        ws();
-        if (i >= s.size() || s[i] != '"') return false;
-        i++; out.clear();
-        while (i < s.size()) {
-            char c = s[i++];
-            if (c == '"') return true;
-            if (c == '\\' && i < s.size()) {
-                char e = s[i++];
-                switch (e) {
-                case 'n': out += '\n'; break;
-                case 'r': out += '\r'; break;
-                case 't': out += '\t'; break;
-                case 'u': {
-                    if (i + 4 > s.size()) return false;
-                    unsigned v = (unsigned)strtoul(s.substr(i, 4).c_str(), nullptr, 16);
-                    i += 4;
-                    if (v < 0x80) out += (char)v;
-                    else if (v < 0x800) { out += (char)(0xC0 | (v >> 6)); out += (char)(0x80 | (v & 0x3F)); }
-                    else { out += (char)(0xE0 | (v >> 12)); out += (char)(0x80 | ((v >> 6) & 0x3F)); out += (char)(0x80 | (v & 0x3F)); }
-                    break;
-                }
-                default: out += e;
-                }
-            } else out += c;
-        }
-        return false;
-    }
-    void skip_value() {
-        ws();
-        if (i >= s.size()) return;
-        if (s[i] == '"') { std::string d; str(d); return; }
-        if (s[i] == '{' || s[i] == '[') {
-            char open = s[i], close = open == '{' ? '}' : ']';
-            int depth = 0;
-            while (i < s.size()) {
-                if (s[i] == open) depth++;
-                else if (s[i] == close && --depth == 0) { i++; return; }
-                i++;
-            }
-            return;
-        }
-        while (i < s.size() && s[i] != ',' && s[i] != '}' && s[i] != ']') i++;
-    }
-};
+#include "json.h"
 
 // Each list entry is {"fields": {..}} (some API versions serve it flat), so
 // nested objects are merged one level deep into the same field map.
@@ -242,7 +192,12 @@ std::vector<Room> parse_lobby(const std::string &json) {
     return rooms;
 }
 
-bool http_get(const std::string &url, std::string &out, std::string &err) {
+static int curl_cancelled(void *ud, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    return (ud && ((const std::atomic<bool> *)ud)->load()) ? 1 : 0;
+}
+
+bool http_get(const std::string &url, std::string &out, std::string &err,
+              const std::atomic<bool> *cancel) {
     CURL *c = curl_easy_init();
     if (!c) { err = "curl init"; return false; }
     curl_easy_setopt(c, CURLOPT_URL, url.c_str());
@@ -265,8 +220,15 @@ bool http_get(const std::string &url, std::string &out, std::string &err) {
             if (v && *v) { curl_easy_setopt(c, CURLOPT_PROXY, v); break; }
         }
     }
+    curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+    if (cancel) {
+        curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, curl_cancelled);
+        curl_easy_setopt(c, CURLOPT_XFERINFODATA, (void *)cancel);
+    }
     CURLcode rc = curl_easy_perform(c);
-    if (rc != CURLE_OK) err = curl_easy_strerror(rc);
+    if (rc == CURLE_ABORTED_BY_CALLBACK) err = "cancelled";
+    else if (rc != CURLE_OK) err = curl_easy_strerror(rc);
     long code = 0;
     curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
     curl_easy_cleanup(c);

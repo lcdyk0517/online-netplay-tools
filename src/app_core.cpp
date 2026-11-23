@@ -43,3 +43,17 @@ void App::round(SDL_Rect rc, int rad, SDL_Color c) {
 }
 // ES owns the UI language (the same source the standalone launchers read):
 // ~/.emulationstation/es_settings.cfg, with the .cn marker as a fallback.
+
+void App::close_fonts() {
+    if (f28) TTF_CloseFont(f28);
+    if (f22) TTF_CloseFont(f22);
+    if (f18) TTF_CloseFont(f18);
+    if (f16) TTF_CloseFont(f16);
+    f28 = f22 = f18 = f16 = nullptr;
+}
+
+App::~App() {
+    async.cancel();
+    async.join();
+    close_fonts();
+}

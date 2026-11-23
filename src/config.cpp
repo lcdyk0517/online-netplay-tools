@@ -23,6 +23,27 @@ std::string zt_net;
 std::string zt_own;
 bool zt_host = false;
 
+static std::string esc_cfg(const std::string &v) {
+    std::string o;
+    o.reserve(v.size() + 8);
+    for (char c : v) {
+        if (c == '\r' || c == '\n') { o += ' '; continue; }
+        if (c == '\\' || c == '"') o += '\\';
+        o += c;
+    }
+    return o;
+}
+
+static std::string unesc_cfg(const std::string &v) {
+    std::string o;
+    o.reserve(v.size());
+    for (size_t i = 0; i < v.size(); i++) {
+        if (v[i] == '\\' && i + 1 < v.size()) { o += v[++i]; continue; }
+        o += v[i];
+    }
+    return o;
+}
+
 bool cfg_get(const char *path, const std::string &key, std::string &out) {
     std::ifstream in(path);
     std::string line;
@@ -33,7 +54,8 @@ bool cfg_get(const char *path, const std::string &key, std::string &out) {
         while (p < t.size() && (t[p] == ' ' || t[p] == '\t')) p++;
         if (p >= t.size() || t[p] != '=') continue;
         out = trim_str(t.substr(p + 1));
-        if (out.size() >= 2 && out.front() == '"' && out.back() == '"') out = out.substr(1, out.size() - 2);
+        if (out.size() >= 2 && out.front() == '"' && out.back() == '"')
+            out = unesc_cfg(out.substr(1, out.size() - 2));
         return true;
     }
     return false;
@@ -50,11 +72,11 @@ void cfg_set(const char *path, const std::string &key, const std::string &value)
         if (!done && t.rfind(key, 0) == 0) {
             size_t p = key.size();
             while (p < t.size() && (t[p] == ' ' || t[p] == '\t')) p++;
-            if (p < t.size() && t[p] == '=') { line = key + " = \"" + value + "\""; done = true; }
+            if (p < t.size() && t[p] == '=') { line = key + " = \"" + esc_cfg(value) + "\""; done = true; }
         }
         lines.push_back(line);
     }
-    if (!done) lines.push_back(key + " = \"" + value + "\"");
+    if (!done) lines.push_back(key + " = \"" + esc_cfg(value) + "\"");
     std::string tmp = std::string(path) + ".ra-lobby.tmp";
     std::ofstream out(tmp);
     if (!out) return;
@@ -82,14 +104,29 @@ void load_cfg() {
         if (zt_host && zt_own.empty()) zt_own = zt_net;
 }
 
-void save_cfg() {
-        mkdir("/home/ark/.config", 0755);
-        std::ofstream out("/home/ark/.config/ra-lobby.cfg");
-        out << "NICK=" << nick << "\n";
-        if (!proxy.empty()) out << "PROXY=" << proxy << "\n";
-        if (!zt_net.empty()) out << "ZTNET=" << zt_net << "\n";
-        if (!zt_own.empty()) out << "ZTOWN=" << zt_own << "\n";
-        out << "ZTHOST=" << (zt_host ? "1" : "0") << "\n";
+bool save_cfg() {
+    auto clean = [](const std::string &v) {
+        std::string o;
+        for (char c : v) o += (c == '\n' || c == '\r') ? ' ' : c;
+        return trim_str(o);
+    };
+    std::string n = clean(nick);
+    std::string px = clean(proxy);
+    std::string zn = clean(zt_net);
+    std::string zo = clean(zt_own);
+    mkdir("/home/ark/.config", 0755);
+    std::string tmp = "/home/ark/.config/ra-lobby.cfg.tmp";
+    std::ofstream out(tmp);
+    if (!out) return false;
+    out << "NICK=" << n << "\n";
+    if (!px.empty()) out << "PROXY=" << px << "\n";
+    if (!zn.empty()) out << "ZTNET=" << zn << "\n";
+    if (!zo.empty()) out << "ZTOWN=" << zo << "\n";
+    out << "ZTHOST=" << (zt_host ? "1" : "0") << "\n";
+    out.flush();
+    if (!out) return false;
+    out.close();
+    return rename(tmp.c_str(), "/home/ark/.config/ra-lobby.cfg") == 0;
 }
 
 void load_ra_all() {

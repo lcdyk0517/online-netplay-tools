@@ -12,7 +12,7 @@
 #include "util.h"
 
 void App::build_systems() {
-    systems.clear();
+    host.systems.clear();
     for (EsSystem &s : load_es_systems("/etc/emulationstation/es_systems.cfg")) {
         auto add = [&](const std::string &c, bool is64) {
             if (c.empty()) return;
@@ -33,21 +33,21 @@ void App::build_systems() {
         bool have = false;
         for (const char *root : { "/roms", "/roms2" }) {
             std::string dir = std::string(root) + "/" + rel;
-            auto it = dir_has_cache.find(dir);
-            if (it == dir_has_cache.end())
-                it = dir_has_cache.emplace(dir, dir_has_game(dir, s.exts, 0)).first;
+            auto it = host.dir_cache.find(dir);
+            if (it == host.dir_cache.end())
+                it = host.dir_cache.emplace(dir, dir_has_game(dir, s.exts, 0)).first;
             if (it->second) { have = true; break; }
         }
         if (!have && access(s.path.c_str(), R_OK) == 0) {
-            auto it = dir_has_cache.find(s.path);
-            if (it == dir_has_cache.end())
-                it = dir_has_cache.emplace(s.path, dir_has_game(s.path, s.exts, 0)).first;
+            auto it = host.dir_cache.find(s.path);
+            if (it == host.dir_cache.end())
+                it = host.dir_cache.emplace(s.path, dir_has_game(s.path, s.exts, 0)).first;
             have = it->second;
         }
         if (!have) continue;
-        systems.push_back(s);
+        host.systems.push_back(s);
     }
-    std::sort(systems.begin(), systems.end(), [](const EsSystem &a, const EsSystem &b) {
+    std::sort(host.systems.begin(), host.systems.end(), [](const EsSystem &a, const EsSystem &b) {
         return lower(a.fullname.empty() ? a.name : a.fullname) <
                lower(b.fullname.empty() ? b.name : b.fullname);
     });
@@ -55,110 +55,110 @@ void App::build_systems() {
 
 
 void App::build_sys_games() {
-    sys_games.clear();
-    if (hsys < 0) return;
-    const EsSystem &s = systems[hsys];
+    host.games.clear();
+    if (host.sys < 0) return;
+    const EsSystem &s = host.systems[host.sys];
     std::string rel = s.path;
     for (const char *pre : { "/roms2/", "/roms/" })
         if (rel.rfind(pre, 0) == 0) { rel = rel.substr(strlen(pre)); break; }
     if (!rel.empty() && rel[0] == '/') rel = rel.substr(1);
     if (!rel.empty() && rel.back() == '/') rel.pop_back();
     for (const char *root : { "/roms", "/roms2" })
-        scan_games_dir(std::string(root) + "/" + rel, s.exts, 0, sys_games);
-    std::sort(sys_games.begin(), sys_games.end(), [](const GameEntry &a, const GameEntry &b) {
+        scan_games_dir(std::string(root) + "/" + rel, s.exts, 0, host.games);
+    std::sort(host.games.begin(), host.games.end(), [](const GameEntry &a, const GameEntry &b) {
         return a.path < b.path;
     });
-    sys_games.erase(std::unique(sys_games.begin(), sys_games.end(),
-        [](const GameEntry &a, const GameEntry &b) { return a.path == b.path; }), sys_games.end());
-    std::sort(sys_games.begin(), sys_games.end(), [](const GameEntry &a, const GameEntry &b) {
+    host.games.erase(std::unique(host.games.begin(), host.games.end(),
+        [](const GameEntry &a, const GameEntry &b) { return a.path == b.path; }), host.games.end());
+    std::sort(host.games.begin(), host.games.end(), [](const GameEntry &a, const GameEntry &b) {
         return lower(a.name) < lower(b.name);
     });
 }
 
 void App::select_system(int idx) {
-    hsys = idx;
-    const EsSystem &s = systems[idx];
-    sys_cores = s.hostable;
-    hcore = sys_cores.empty() ? "" : sys_cores[0];
-    hgame_name.clear();
-    hgame_path.clear();
+    host.sys = idx;
+    const EsSystem &s = host.systems[idx];
+    host.cores = s.hostable;
+    host.core = host.cores.empty() ? "" : host.cores[0];
+    host.game_name.clear();
+    host.game_path.clear();
     build_sys_games();
 }
 
 std::string App::system_alias() const {
-    if (hsys < 0) return "";
-    const EsSystem &s = systems[hsys];
+    if (host.sys < 0) return "";
+    const EsSystem &s = host.systems[host.sys];
     return s.fullname.empty() ? s.name : s.fullname;
 }
 
 int App::picker_count() const {
-    if (pick_kind == 0) return (int)systems.size();
-    if (pick_kind == 1) return (int)sys_games.size();
-    return (int)sys_cores.size();
+    if (host.pick_kind == 0) return (int)host.systems.size();
+    if (host.pick_kind == 1) return (int)host.games.size();
+    return (int)host.cores.size();
 }
 
 void App::picker_move(int d) {
     int n = picker_count();
     if (n == 0) return;
-    pick_sel = std::max(0, std::min(n - 1, pick_sel + d));
+    host.pick_sel = std::max(0, std::min(n - 1, host.pick_sel + d));
     int vis = std::max(3, (SH - 220) / 44);
-    if (pick_sel < pick_scroll) pick_scroll = pick_sel;
-    if (pick_sel >= pick_scroll + vis) pick_scroll = pick_sel - vis + 1;
+    if (host.pick_sel < host.pick_scroll) host.pick_scroll = host.pick_sel;
+    if (host.pick_sel >= host.pick_scroll + vis) host.pick_scroll = host.pick_sel - vis + 1;
 }
 
 void App::picker_choose() {
-    if (pick_kind == 0) {
-        if (pick_sel < (int)systems.size()) select_system(pick_sel);
-    } else if (pick_kind == 1) {
-        if (pick_sel < (int)sys_games.size()) {
-            hgame_name = sys_games[pick_sel].name;
-            hgame_path = sys_games[pick_sel].path;
+    if (host.pick_kind == 0) {
+        if (host.pick_sel < (int)host.systems.size()) select_system(host.pick_sel);
+    } else if (host.pick_kind == 1) {
+        if (host.pick_sel < (int)host.games.size()) {
+            host.game_name = host.games[host.pick_sel].name;
+            host.game_path = host.games[host.pick_sel].path;
         }
-    } else if (pick_kind == 2) {
-        if (pick_sel < (int)sys_cores.size()) hcore = sys_cores[pick_sel];
+    } else if (host.pick_kind == 2) {
+        if (host.pick_sel < (int)host.cores.size()) host.core = host.cores[host.pick_sel];
     }
     screen = 3;
 }
 
-void App::host_move(int d) { hsel = std::max(0, std::min(7, hsel + d)); }
+void App::host_move(int d) { host.row = std::max(0, std::min(7, host.row + d)); }
 
 void App::host_change() {
-    switch (hsel) {
+    switch (host.row) {
     case 0:
     case 1:
     case 2: {
-        if (hsel >= 1 && hsys < 0) { show_toast(L("先选择系统", "Pick a system first")); break; }
-        pick_kind = hsel;
-        pick_sel = 0;
-        pick_scroll = 0;
+        if (host.row >= 1 && host.sys < 0) { show_toast(L("先选择系统", "Pick a system first")); break; }
+        host.pick_kind = host.row;
+        host.pick_sel = 0;
+        host.pick_scroll = 0;
         screen = 4;
         break;
     }
     case 3:
-        if (lan_only) { show_toast(L("仅局域网模式下固定直连", "LAN-only forces direct")); break; }
-        open_settings(); ssel = 1;
+        if (host.lan_only) { show_toast(L("仅局域网模式下固定直连", "LAN-only forces direct")); break; }
+        open_settings(); set.sel = 1;
         break;
     case 4:
-        if (lan_only) { show_toast(L("仅局域网模式不公开", "LAN-only is not announced")); break; }
+        if (host.lan_only) { show_toast(L("仅局域网模式不公开", "LAN-only is not announced")); break; }
         announce = !announce;
         break;
-    case 5: lan_only = !lan_only; break;
+    case 5: host.lan_only = !host.lan_only; break;
     case 6:
-        if (host_pass_on) { host_pass_on = false; host_pass.clear(); }
-        else { open_editor(4); edit_buf.clear(); }
+        if (host.pass_on) { host.pass_on = false; host.pass.clear(); }
+        else { open_editor(4); set.buf.clear(); }
         break;
     case 7: host_launch(); break;
     }
 }
 
 void App::host_launch() {
-    if (hgame_path.empty()) { show_toast(L("先选择游戏", "Pick a game first")); return; }
-    if (hcore.empty() || !cores.count(hcore)) { show_toast(L("先选择核心", "Pick a core first")); return; }
-    const CoreRef &cr = cores[hcore];
+    if (host.game_path.empty()) { show_toast(L("先选择游戏", "Pick a game first")); return; }
+    if (host.core.empty() || !cores.count(host.core)) { show_toast(L("先选择核心", "Pick a core first")); return; }
+    const CoreRef &cr = cores[host.core];
     bool is64 = !cr.path64.empty();
     std::string core = is64 ? cr.path64 : cr.path32;
     if (core.empty()) { show_toast(L("核心不可用", "Core unavailable")); return; }
-    launch_host(core, is64, hgame_path, lan_only, host_pass_on ? host_pass : std::string());
+    launch_host(core, is64, host.game_path, host.lan_only, host.pass_on ? host.pass : std::string());
 }
 
 void App::request_join(const Room &rm) {

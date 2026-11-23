@@ -38,8 +38,9 @@ std::string netplay_compat_args(const std::string &peer_version,
                                        const std::string &pass, int port) {
     /* Our own build still reports 1.22.2 while speaking protocol 8, so a
      * peer version >= 1.23 is the only safe "new peer" signal. Everything
-     * else (including 1.22.2) takes the compatible path. */
-    bool new_peer = ra_version_at_least(peer_version, 1, 23, 0);
+     * else (including 1.22.2 and LAN rooms without a version) takes the
+     * compatible path, matching our host. */
+    bool new_peer = !peer_version.empty() && ra_version_at_least(peer_version, 1, 23, 0);
     std::string pw;
     for (char c : pass) if (c != '"' && c != '\\') pw += c;
     if (new_peer && pw.empty()) return "";

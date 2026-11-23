@@ -178,7 +178,7 @@ void App::draw_settings() {
     int ry = y + 74, rh = 46;
     for (int id : settings_rows()) {
         SDL_Rect row{x + 20, ry, w - 40, rh - 8};
-        if (id == ssel) {
+        if (id == set.sel) {
             round(row, 12, SEL_BG);
             fill({row.x, row.y + 8, 4, row.h - 16}, ACCENT);
         }
@@ -194,7 +194,7 @@ void App::draw_settings() {
         else if (id == 5) {
             label = L("ZeroTier", "ZeroTier");
             value = zt_state_text();
-            if (zt_st.state == "notjo")
+            if (zt.st.state == "notjo")
                 value += zt_valid_id(zt_net) ? L(" · 按 A 加入网络", " · A to join")
                                              : L(" · 按 A 输入网络 ID", " · A to enter network ID");
         }
@@ -208,8 +208,8 @@ void App::draw_settings() {
         if (!value.empty()) text(f18, value, row.x + 250, row.y + 14, ACCENT_D, row.w - 280);
         ry += rh;
     }
-    if (!zt_st.node.empty())
-        text(f16, L("节点 ID: ", "Node ID: ") + zt_st.node, x + 28, y + h - 58, MUTED, w - 56);
+    if (!zt.st.node.empty())
+        text(f16, L("节点 ID: ", "Node ID: ") + zt.st.node, x + 28, y + h - 58, MUTED, w - 56);
     text(f16, L("A 修改/加入 · B 返回 · Start 保存", "A edit/join · B back · Start save"),
          x + 28, y + h - 34, MUTED);
 }
@@ -220,21 +220,21 @@ void App::draw_editor() {
     int w = std::min(SW - 60, 900), h = std::min(SH - 60, 500);
     int x = (SW - w) / 2, y = (SH - h) / 2;
     round({x, y, w, h}, 18, CARD);
-    const char *etitle = edit_target == 0 ? L("用户名", "Nickname")
-                       : edit_target == 1 ? L("自定义中继 (host|port)", "Custom relay (host|port)")
-                       : edit_target == 2 ? L("ZeroTier 网络 ID", "ZeroTier network ID")
+    const char *etitle = set.target == 0 ? L("用户名", "Nickname")
+                       : set.target == 1 ? L("自定义中继 (host|port)", "Custom relay (host|port)")
+                       : set.target == 2 ? L("ZeroTier 网络 ID", "ZeroTier network ID")
                                           : L("房间密码", "Room password");
     text(f28, etitle, x + 24, y + 18, TXT);
     int bx = x + 24, by = y + 66, bw = w - 48;
     round({bx, by, bw, 46}, 10, CHIP);
-    std::string shown = (edit_target == 3 || edit_target == 4) ? std::string(edit_buf.size(), '*') : edit_buf;
+    std::string shown = (set.target == 3 || set.target == 4) ? std::string(set.buf.size(), '*') : set.buf;
     text(f22, shown + "_", bx + 14, by + 8, TXT, bw - 28);
     int cols = 13, kw = (bw - (cols - 1) * 4) / cols, kh = 40, gy = by + 62;
     for (int row = 0; row < 5; row++) {
         int len = (int)strlen(OSK_ROWS[row]);
         for (int col = 0; col < len; col++) {
             SDL_Rect k{bx + col * (kw + 4), gy + row * (kh + 4), kw, kh};
-            bool on = erow == row && ecol == col;
+            bool on = set.row == row && set.col == col;
             round(k, 8, on ? ACCENT : CHIP);
             std::string s(1, OSK_ROWS[row][col]);
             int tw = 0; TTF_SizeUTF8(f18, s.c_str(), &tw, nullptr);
@@ -246,7 +246,7 @@ void App::draw_editor() {
     int spw = (bw - 5 * 6) / 6, sy = gy + 5 * (kh + 4) + 6;
     for (int i = 0; i < 6; i++) {
         SDL_Rect k{bx + i * (spw + 6), sy, spw, 42};
-        bool on = erow == 5 && ecol == i;
+        bool on = set.row == 5 && set.col == i;
         round(k, 8, on ? ACCENT : CHIP);
         int tw = 0; TTF_SizeUTF8(f18, labels[i], &tw, nullptr);
         text(f18, labels[i], k.x + (spw - tw) / 2, k.y + 9, on ? CARD : TXT);
@@ -259,7 +259,7 @@ void App::draw_editor() {
 
 void App::draw_members() {
     fill({0, 0, SW, SH}, DIM);
-    int n = (int)zt_members_list.size();
+    int n = (int)zt.members.size();
     int vis = std::max(3, (SH - 220) / 44);
     int w = std::min(SW - 100, 860), h = std::min(SH - 100, vis * 44 + 150);
     int x = (SW - w) / 2, y = (SH - h) / 2;
@@ -268,11 +268,11 @@ void App::draw_members() {
     text(f16, zt_net, x + w - 24 - 200, y + 28, MUTED, 200);
     int ly = y + 68;
     for (int i = 0; i < vis; i++) {
-        int idx = zt_mscroll + i;
+        int idx = zt.mscroll + i;
         if (idx >= n) break;
-        const ZtMember &m = zt_members_list[idx];
+        const ZtMember &m = zt.members[idx];
         SDL_Rect row{x + 16, ly + i * 44, w - 32, 40};
-        if (idx == zt_msel) {
+        if (idx == zt.msel) {
             round(row, 8, SEL_BG);
             fill({row.x, row.y + 6, 4, row.h - 12}, ACCENT);
         }
@@ -303,20 +303,20 @@ void App::draw_host() {
         L("开始开房", "Start hosting") };
     for (int id = 0; id < 8; id++) {
         SDL_Rect row{x + 20, ry, w - 40, rh - 8};
-        if (id == hsel) {
+        if (id == host.row) {
             round(row, 12, SEL_BG);
             fill({row.x, row.y + 8, 4, row.h - 16}, ACCENT);
         }
         std::string value;
         switch (id) {
-        case 0: value = hsys < 0 ? L("未选择", "Not selected") : system_alias(); break;
-        case 1: value = hgame_path.empty() ? L("未选择", "Not selected") : hgame_name; break;
-        case 2: value = hcore.empty() ? L("未选择", "Not selected") : hcore; break;
-        case 3: value = lan_only ? L("局域网直连", "LAN direct") : relay_label(relay_idx()); break;
-        case 4: value = lan_only ? L("关 (仅局域网)", "Off (LAN only)")
+        case 0: value = host.sys < 0 ? L("未选择", "Not selected") : system_alias(); break;
+        case 1: value = host.game_path.empty() ? L("未选择", "Not selected") : host.game_name; break;
+        case 2: value = host.core.empty() ? L("未选择", "Not selected") : host.core; break;
+        case 3: value = host.lan_only ? L("局域网直连", "LAN direct") : relay_label(relay_idx()); break;
+        case 4: value = host.lan_only ? L("关 (仅局域网)", "Off (LAN only)")
                                  : (announce ? L("开", "On") : L("关", "Off")); break;
-        case 5: value = lan_only ? L("开", "On") : L("关", "Off"); break;
-        case 6: value = host_pass_on ? L("开", "On") : L("关", "Off"); break;
+        case 5: value = host.lan_only ? L("开", "On") : L("关", "Off"); break;
+        case 6: value = host.pass_on ? L("开", "On") : L("关", "Off"); break;
         default: break;
         }
         text(f22, labels[id], row.x + 18, row.y + 10, TXT);
@@ -337,32 +337,32 @@ void App::draw_picker() {
     int w = std::min(SW - 100, 860), h = std::min(SH - 100, vis * 44 + 150);
     int x = (SW - w) / 2, y = (SH - h) / 2;
     round({x, y, w, h}, 18, CARD);
-    const char *title = pick_kind == 0 ? L("选择系统", "Choose system")
-                      : pick_kind == 1 ? L("选择游戏", "Choose game")
+    const char *title = host.pick_kind == 0 ? L("选择系统", "Choose system")
+                      : host.pick_kind == 1 ? L("选择游戏", "Choose game")
                                        : L("选择核心", "Choose core");
     text(f28, title, x + 24, y + 18, TXT);
-    if (pick_kind == 1 && hsys >= 0)
-        text(f16, systems[hsys].fullname.empty() ? systems[hsys].name : systems[hsys].fullname,
+    if (host.pick_kind == 1 && host.sys >= 0)
+        text(f16, host.systems[host.sys].fullname.empty() ? host.systems[host.sys].name : host.systems[host.sys].fullname,
              x + w - 24 - 200, y + 28, MUTED, 200);
     int ly = y + 68;
     for (int i = 0; i < vis; i++) {
-        int idx = pick_scroll + i;
+        int idx = host.pick_scroll + i;
         if (idx >= n) break;
         SDL_Rect row{x + 16, ly + i * 44, w - 32, 40};
-        if (idx == pick_sel) {
+        if (idx == host.pick_sel) {
             round(row, 8, SEL_BG);
             fill({row.x, row.y + 6, 4, row.h - 12}, ACCENT);
         }
         std::string name, sub;
-        if (pick_kind == 0) {
-            const EsSystem &sy = systems[idx];
+        if (host.pick_kind == 0) {
+            const EsSystem &sy = host.systems[idx];
             name = sy.fullname.empty() ? sy.name : sy.fullname;
             sub = sy.name;
-        } else if (pick_kind == 1) {
-            name = sys_games[idx].name;
-            sub = systems[hsys].name;
+        } else if (host.pick_kind == 1) {
+            name = host.games[idx].name;
+            sub = host.systems[host.sys].name;
         } else {
-            name = sys_cores[idx];
+            name = host.cores[idx];
             auto it = cores.find(name);
             if (it != cores.end())
                 sub = it->second.path64.empty() ? "32" : (it->second.path32.empty() ? "64" : "64+32");
@@ -372,7 +372,7 @@ void App::draw_picker() {
         text(f16, sub, row.x + row.w - 14 - sw, row.y + 11, MUTED);
     }
     if (n == 0)
-        text(f22, pick_kind == 1 ? L("这个系统下没有游戏", "No games in this system")
+        text(f22, host.pick_kind == 1 ? L("这个系统下没有游戏", "No games in this system")
                                  : L("没有可选内容", "Nothing to choose"),
              x + 24, y + 90, MUTED);
     text(f16, L("A 选择 · B 返回", "A select · B back"), x + 24, y + h - 34, MUTED);
