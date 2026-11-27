@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 extern const char *RA_CFG64;
 extern const char *RA_CFG32;
@@ -12,6 +13,11 @@ extern bool use_mitm;
 extern std::string mitm_server;
 extern std::string custom_mitm;
 extern bool announce;
+
+// Relays added through the UI, in the order they were added (host|port).
+extern std::vector<std::string> relays;
+bool relay_known(const std::string &v);
+void relay_remember(const std::string &v);
 
 // ra-lobby.cfg
 extern std::string proxy;

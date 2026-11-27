@@ -17,6 +17,7 @@ extern const char *NETID_ROWS[2];
 
 struct App {
     AsyncTask async;
+    AsyncTask lat_async;
     bool zt_refresh_pending = false;
     bool lan_scan_pending = false;
     bool lobby_refresh_pending = false;
@@ -111,6 +112,12 @@ struct App {
     int relay_idx() const;
     void set_relay_idx(int i);
     std::string relay_label(int i) const;
+    int relay_choice_count() const;
+    std::string relay_choice_label(int i) const;
+    bool relay_choice_current(int i) const;
+    void relay_test_latency();
+    std::map<std::string, int> relay_lat;   // host|port -> ms, -1 failed
+    bool relay_lat_pending = false;
     void open_choice(int ret_screen);
     void choice_move(int d);
     void choice_choose();

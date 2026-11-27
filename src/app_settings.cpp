@@ -4,6 +4,9 @@
 #include <cstring>
 #include <ctime>
 #include <string>
+#include <map>
+#include <memory>
+#include <thread>
 
 #include "config.h"
 #include "i18n.h"
@@ -46,8 +49,78 @@ std::string App::relay_label(int i) const {
     case 2: return L("马德里", "Madrid");
     case 3: return L("圣保罗", "Sao Paulo");
     case 4: return L("新加坡", "Singapore");
-    default: return L("自定义", "Custom");
+    default: return custom_mitm.empty() ? L("自定义", "Custom") : custom_mitm;
     }
+}
+
+int App::relay_choice_count() const {
+    return 5 + (int)relays.size() + 2;
+}
+
+std::string App::relay_choice_label(int i) const {
+    static const char *presets[4] = { "nyc", "madrid", "saopaulo", "singapore" };
+    auto with_ms = [this](std::string s, const std::string &key) {
+        auto it = relay_lat.find(key);
+        if (it != relay_lat.end())
+            s += it->second < 0 ? L(" · 超时", " · timeout") : " · " + std::to_string(it->second) + " ms";
+        return s;
+    };
+    if (i == 0) return L("直连", "Direct");
+    if (i <= 4) return with_ms(relay_label(i), presets[i - 1]);
+    const int r = (int)relays.size();
+    if (i < 5 + r) return with_ms(relays[i - 5], relays[i - 5]);
+    if (i == 5 + r) return L("添加中继…", "Add relay…");
+    return relay_lat_pending ? L("测试延迟中…", "Testing latency…") : L("测试延迟", "Test latency");
+}
+
+bool App::relay_choice_current(int i) const {
+    if (i == 0) return !use_mitm;
+    static const char *presets[4] = { "nyc", "madrid", "saopaulo", "singapore" };
+    if (i <= 4) return use_mitm && mitm_server == presets[i - 1];
+    const int r = (int)relays.size();
+    if (i < 5 + r) return use_mitm && mitm_server == "custom" && custom_mitm == relays[i - 5];
+    return false;
+}
+
+void App::relay_test_latency() {
+    if (lat_async.busy()) {
+        show_toast(L("请稍候", "Please wait"));
+        return;
+    }
+    struct Job {
+        std::string key;      // "nyc" for a built-in, the address for a saved relay
+        std::string handle;   // built-in handle, empty for a saved relay
+        std::string addr;     // host|port for a saved relay
+        int ms = -1;
+    };
+    auto jobs = std::make_shared<std::vector<Job>>();
+    static const char *presets[4] = { "nyc", "madrid", "saopaulo", "singapore" };
+    for (const char *p : presets)
+        jobs->push_back(Job{ p, p, "", -1 });
+    for (const auto &r : relays)
+        jobs->push_back(Job{ r, "", r, -1 });
+    auto out = std::make_shared<std::map<std::string, int>>();
+    relay_lat_pending = true;
+    lat_async.start([this, jobs, out] {
+        std::vector<std::thread> th;
+        for (auto &job : *jobs) {
+            th.emplace_back([&job] {
+                std::string addr = job.addr;
+                if (!job.handle.empty()) {
+                    std::string a; int p = 0;
+                    if (!lobby_tunnel(job.handle, a, p)) return;
+                    addr = a + "|" + std::to_string(p);
+                }
+                job.ms = tcp_latency_ms(addr, 1200);
+            });
+        }
+        for (auto &t : th) t.join();
+    }, [this, jobs, out] {
+        for (const auto &job : *jobs) (*out)[job.key] = job.ms;
+        relay_lat = *out;
+        relay_lat_pending = false;
+        show_toast(L("延迟测试完成", "Latency test done"));
+    });
 }
 
 void App::open_choice(int ret_screen) {
@@ -58,7 +131,7 @@ void App::open_choice(int ret_screen) {
 }
 
 void App::choice_move(int d) {
-    const int n = 6;
+    const int n = relay_choice_count();
     choice.sel = std::max(0, std::min(n - 1, choice.sel + d));
     int vis = std::max(3, (SH - 220) / 44);
     if (choice.sel < choice.scroll) choice.scroll = choice.sel;
@@ -66,13 +139,31 @@ void App::choice_move(int d) {
 }
 
 void App::choice_choose() {
-    set_relay_idx(choice.sel);
-    if (choice.sel == 5) {
-        /* Custom relay is a free-form address; go straight to the editor. */
+    const int r = (int)relays.size();
+    if (choice.sel <= 4) {
+        set_relay_idx(choice.sel);
+        save_cfg();
+        save_ra_all();
+        screen = choice.ret;
+        return;
+    }
+    if (choice.sel < 5 + r) {
+        custom_mitm = relays[choice.sel - 5];
+        use_mitm = true;
+        mitm_server = "custom";
+        save_cfg();
+        save_ra_all();
+        screen = choice.ret;
+        return;
+    }
+    if (choice.sel == 5 + r) {
         open_editor(1);
         return;
     }
-    screen = choice.ret;
+    if (choice.sel == 5 + r + 1) {
+        relay_test_latency();
+        return;
+    }
 }
 
 std::vector<int> App::settings_rows() const {
@@ -142,7 +233,7 @@ void App::settings_change() {
         show_toast(L("ZeroTier 状态已刷新", "ZeroTier status refreshed"));
         break;
     case 8: {
-        if (nick.empty()) nick = "darkos3562";
+        if (nick.empty()) nick = "lcdyk0517";
         bool ok = save_cfg();
         save_ra_all();
         screen = 0;
@@ -183,8 +274,27 @@ void App::editor_finish() {
         save_ra_all();
     }
     else if (set.target == 1) {
-        custom_mitm = set.buf;
+        std::string v = trim_str(set.buf);
+        if (v.find('|') == std::string::npos) {
+            size_t colon = v.rfind(':');
+            if (colon != std::string::npos && colon > 0 && v.find(':') == colon)
+                v = v.substr(0, colon) + "|" + v.substr(colon + 1);
+        }
+        size_t bar = v.find('|');
+        std::string host = bar == std::string::npos ? "" : trim_str(v.substr(0, bar));
+        std::string ps = bar == std::string::npos ? "" : trim_str(v.substr(bar + 1));
+        char *end = nullptr;
+        long port = ps.empty() ? 0 : strtol(ps.c_str(), &end, 10);
+        if (host.empty() || ps.empty() || !end || *end || port <= 0 || port > 65535) {
+            show_toast(L("格式应为 host|port", "Use host|port"));
+            return;
+        }
+        custom_mitm = host + "|" + std::to_string(port);
+        use_mitm = true;
+        mitm_server = "custom";
+        relay_remember(custom_mitm);
         save_ra_all();
+        show_toast(L("中继已保存", "Relay saved"));
     }
     else if (set.target == 2) {
         std::string id;

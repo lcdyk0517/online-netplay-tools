@@ -368,7 +368,7 @@ void App::draw_host() {
 
 void App::draw_choice() {
     fill({0, 0, SW, SH}, DIM);
-    const int n = 6;
+    const int n = relay_choice_count();
     int vis = std::max(3, (SH - 220) / 44);
     int rows = std::min(n, vis);
     int w = std::min(SW - 100, 700), h = rows * 44 + 132;
@@ -376,7 +376,6 @@ void App::draw_choice() {
     round({x, y, w, h}, 18, CARD);
     text(f28, L("中继服务器", "Relay server"), x + 24, y + 18, TXT);
     int ly = y + 66;
-    int current = relay_idx();
     for (int i = 0; i < rows; i++) {
         int idx = choice.scroll + i;
         if (idx >= n) break;
@@ -385,14 +384,14 @@ void App::draw_choice() {
             round(row, 8, SEL_BG);
             fill({row.x, row.y + 6, 4, row.h - 12}, ACCENT);
         }
-        text(f18, relay_label(idx), row.x + 14, row.y + 8, TXT, row.w - 120);
-        if (idx == current) {
+        text(f18, relay_choice_label(idx), row.x + 14, row.y + 8, TXT, row.w - 120);
+        if (relay_choice_current(idx)) {
             const char *cur = L("当前", "Current");
             int cw = 0; TTF_SizeUTF8(f16, cur, &cw, nullptr);
             text(f16, cur, row.x + row.w - 14 - cw, row.y + 11, ACCENT_D);
         }
     }
-    text(f16, L("A 选择 · B 返回", "A select · B back"), x + 24, y + h - 30, MUTED);
+    text(f16, L("A 选择 · B 返回 · 中继会保存在本机", "A select · B back · relays are kept on this device"), x + 24, y + h - 30, MUTED);
 }
 
 void App::draw_picker() {

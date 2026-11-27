@@ -94,6 +94,11 @@ void App::refresh_zt_async() {
 
 void App::poll_async() {
     async.poll();
+    lat_async.poll();
+    if (lat_async.consume_failure()) {
+        relay_lat_pending = false;
+        show_toast(L("延迟测试失败", "Latency test failed"));
+    }
     if (async.consume_failure())
         show_toast(L("后台任务失败", "Background task failed"));
     if (async.busy()) return;

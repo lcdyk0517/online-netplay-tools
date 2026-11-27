@@ -14,11 +14,12 @@ const char *RA_CFG64 = "/home/ark/.config/retroarch/retroarch.cfg";
 const char *RA_CFG32 = "/home/ark/.config/retroarch32/retroarch.cfg";
 
 
-std::string nick = "darkos3562";
+std::string nick = "lcdyk0517";
 bool use_mitm = false;
 std::string mitm_server = "nyc";
 std::string custom_mitm;
 bool announce = true;
+std::vector<std::string> relays;
 std::string proxy;
 std::string zt_net;
 std::string zt_own;
@@ -107,6 +108,17 @@ void load_cfg() {
             if (line.rfind("SHORTURL=", 0) == 0 && line.size() > 9) short_url = line.substr(9);
             if (line.rfind("ZTSHORT=", 0) == 0 && line.size() > 8) zt_short = lower(line.substr(8));
             if (line.rfind("ZTSHORTEXP=", 0) == 0) zt_short_exp = atoll(line.substr(11).c_str());
+            if (line.rfind("RELAYS=", 0) == 0) {
+                relays.clear();
+                size_t at = 7;
+                while (at <= line.size()) {
+                    size_t e = line.find(';', at);
+                    std::string v = trim_str(line.substr(at, e == std::string::npos ? std::string::npos : e - at));
+                    if (!v.empty()) relays.push_back(v);
+                    if (e == std::string::npos) break;
+                    at = e + 1;
+                }
+            }
         }
         if (zt_host && zt_own.empty()) zt_own = zt_net;
 }
@@ -135,10 +147,29 @@ bool save_cfg() {
     if (!su.empty()) out << "SHORTURL=" << su << "\n";
     if (!sc.empty()) out << "ZTSHORT=" << sc << "\n";
     if (zt_short_exp > 0) out << "ZTSHORTEXP=" << zt_short_exp << "\n";
+    if (!relays.empty()) {
+        out << "RELAYS=";
+        for (size_t i = 0; i < relays.size(); i++) {
+            if (i) out << ';';
+            out << clean(relays[i]);
+        }
+        out << "\n";
+    }
     out.flush();
     if (!out) return false;
     out.close();
     return rename(tmp.c_str(), "/home/ark/.config/ra-lobby.cfg") == 0;
+}
+
+bool relay_known(const std::string &v) {
+    for (const auto &r : relays) if (r == v) return true;
+    return false;
+}
+
+void relay_remember(const std::string &v) {
+    if (v.empty() || relay_known(v)) return;
+    relays.push_back(v);
+    save_cfg();
 }
 
 void load_ra_all() {
@@ -154,6 +185,8 @@ void load_ra_all() {
     if (get("netplay_mitm_server", v) && !v.empty()) mitm_server = v;
     if (get("netplay_custom_mitm_server", v)) custom_mitm = v;
     if (get("netplay_public_announce", v)) announce = (v == "true" || v == "1");
+    /* Keep a relay configured before this list existed, and never drop one. */
+    if (!custom_mitm.empty()) relay_remember(custom_mitm);
 }
 
 void save_ra_all() {
