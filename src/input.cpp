@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <algorithm>
 
+#include "config.h"
 #include "i18n.h"
 
 int run_app(App &app) {
@@ -62,7 +63,7 @@ int run_app(App &app) {
     };
     auto start_btn = [&]() {
         if (app.screen == 0) app.open_settings();
-        else if (app.screen == 1) { app.set.sel = 4; app.settings_change(); }
+        else if (app.screen == 1) { app.set.sel = 8; app.settings_change(); }  /* Start = save */
         else if (app.screen == 2) app.editor_finish();
         else if (app.screen == 3) app.host_launch();
         else if (app.screen == 4) app.picker_choose();
@@ -162,5 +163,8 @@ int run_app(App &app) {
         SDL_Delay(16);
     }
     if (pad) SDL_GameControllerClose(pad);
+    // Persist anything still in memory even if the user exits without the save row.
+    save_cfg();
+    save_ra_all();
     return 0;
 }

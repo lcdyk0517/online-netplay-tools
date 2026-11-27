@@ -177,8 +177,15 @@ void App::editor_move(int dx, int dy) {
 }
 
 void App::editor_finish() {
-    if (set.target == 0) { if (!set.buf.empty()) nick = set.buf; }
-    else if (set.target == 1) custom_mitm = set.buf;
+    if (set.target == 0) {
+        if (!set.buf.empty()) nick = set.buf;
+        save_cfg();
+        save_ra_all();
+    }
+    else if (set.target == 1) {
+        custom_mitm = set.buf;
+        save_ra_all();
+    }
     else if (set.target == 2) {
         std::string id;
         for (char c : set.buf)
